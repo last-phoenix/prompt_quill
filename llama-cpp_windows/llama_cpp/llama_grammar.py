@@ -1470,7 +1470,7 @@ class SchemaConverter:
         assert isinstance(schema_type, str), f"Unrecognized schema: {schema}"
 
         if schema_type == "object" and "properties" in schema:
-            # TODO: `required` keyword
+            required = set(schema.get("required", []))
             if self._prop_order:
                 prop_order = self._prop_order
                 prop_pairs = sorted(
@@ -1481,15 +1481,30 @@ class SchemaConverter:
             else:
                 prop_pairs = schema["properties"].items()
 
-            rule = '"{" space'
-            for i, (prop_name, prop_schema) in enumerate(prop_pairs):
+            prop_data = []
+            for prop_name, prop_schema in prop_pairs:
                 prop_rule_name = self.visit(
                     prop_schema, f'{name}{"-" if name else ""}{prop_name}'
                 )
-                if i > 0:
-                    rule += ' "," space'
-                rule += rf' {self._format_literal(prop_name)} space ":" space {prop_rule_name}'
-            rule += ' "}" space'
+                prop_data.append((prop_name, prop_rule_name, prop_name in required))
+
+            def build_obj_rule(idx: int, needs_comma: bool) -> str:
+                if idx >= len(prop_data):
+                    return ""
+
+                prop_name, prop_rule_name, is_req = prop_data[idx]
+                prop_kv = rf' {self._format_literal(prop_name)} space ":" space {prop_rule_name}'
+
+                if is_req:
+                    prefix = ' "," space' if needs_comma else ''
+                    return prefix + prop_kv + build_obj_rule(idx + 1, True)
+                else:
+                    if needs_comma:
+                        return f' ( "," space {prop_kv} )? {build_obj_rule(idx + 1, True)}'
+                    else:
+                        return f' ( {prop_kv} {build_obj_rule(idx + 1, True)} | {build_obj_rule(idx + 1, False)} )'
+
+            rule = '"{" space' + build_obj_rule(0, False) + ' "}" space'
 
             return self._add_rule(rule_name, rule)
 
