@@ -1677,7 +1677,116 @@ def functionary_v1_v2_chat_handler(
         )
         return _convert_completion_to_chat(completion_or_completion_chunks, stream=stream)  # type: ignore
 
-    assert stream is False  # TODO: support stream mode
+    def _convert_completion_to_chat_function(
+        tool_name: str,
+        completion_or_chunks: Union[
+            llama_types.CreateCompletionResponse,
+            Iterator[llama_types.CreateCompletionStreamResponse],
+        ],
+        stream: bool,
+        tool_id: Optional[str] = None,
+    ):
+        if stream:
+            chunks: Iterator[llama_types.CreateCompletionStreamResponse] = completion_or_chunks  # type: ignore
+
+            def _stream_response_to_function_stream(
+                chunks: Iterator[llama_types.CreateCompletionStreamResponse],
+            ) -> Iterator[llama_types.CreateChatCompletionStreamResponse]:
+                first = True
+                id_ = None
+                created = None
+                model = None
+                for chunk in chunks:
+                    if first:
+                        id_ = "chat" + chunk["id"]
+                        created = chunk["created"]
+                        model = chunk["model"]
+                        if tool_id is None:
+                            _tool_id = "call_" + "_0_" + tool_name + "_" + chunk["id"]
+                        else:
+                            _tool_id = tool_id
+                        yield {
+                            "id": id_,
+                            "object": "chat.completion.chunk",
+                            "created": created,
+                            "model": model,
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "finish_reason": None,
+                                    "logprobs": None,
+                                    "delta": {
+                                        "role": "assistant",
+                                        "content": None,
+                                        "function_call": None,
+                                        "tool_calls": [
+                                            {
+                                                "index": 0,
+                                                "id": _tool_id,
+                                                "type": "function",
+                                                "function": {
+                                                    "name": tool_name,
+                                                    "arguments": "",
+                                                },
+                                            }
+                                        ],
+                                    },
+                                }
+                            ],
+                        }
+                        first = False
+
+                    yield {
+                        "id": "chat" + chunk["id"],
+                        "object": "chat.completion.chunk",
+                        "created": chunk["created"],
+                        "model": chunk["model"],
+                        "choices": [
+                            {
+                                "index": 0,
+                                "finish_reason": None,
+                                "logprobs": None,
+                                "delta": {
+                                    "role": None,
+                                    "content": None,
+                                    "function_call": None,
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            "function": {
+                                                "arguments": chunk["choices"][0]["text"],
+                                            },
+                                        }
+                                    ],
+                                },
+                            }
+                        ],
+                    }
+
+                if id_ is not None and created is not None and model is not None:
+                    yield {
+                        "id": id_,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "finish_reason": "tool_calls",
+                                "logprobs": None,
+                                "delta": {
+                                    "role": None,
+                                    "content": None,
+                                    "function_call": None,
+                                    "tool_calls": None,
+                                },
+                            }
+                        ],
+                    }
+
+            return _stream_response_to_function_stream(chunks)
+        else:
+             raise NotImplementedError("Use stream=True for this helper")
 
     def get_grammar(function_call):
         function_body = None
@@ -1736,6 +1845,291 @@ def functionary_v1_v2_chat_handler(
         )
 
         return completion
+
+    if stream:
+        if version == "v1":
+            # If no or "auto" tool_choice/function_call
+            if function_call is None or (
+                isinstance(function_call, str) and function_call == "auto"
+            ):
+                stops = ["\n", END_ASSISTANT_TOKEN, START_FUNCTION_CALL_TOKEN]
+            # If tool_choice/function_call is "none"
+            elif isinstance(function_call, str) and function_call == "none":
+                prompt = prepare_messages_for_inference(
+                    messages, tokenizer, version, [], []
+                )
+                stops = [END_ASSISTANT_TOKEN]
+            # If tool_choice/function_call is provided
+            elif isinstance(function_call, dict):
+                prompt += f"{START_FUNCTION_CALL_TOKEN}{function_call['name']}:\n"
+                stops = [END_FUNCTION_CALL_TOKEN]
+                function_call_name = function_call["name"]
+                grammar = get_grammar(function_call_name)
+                completion = llama.create_completion(
+                    prompt=prompt,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    min_p=min_p,
+                    typical_p=typical_p,
+                    stream=True,
+                    stop=stops,
+                    max_tokens=max_tokens,
+                    presence_penalty=presence_penalty,
+                    frequency_penalty=frequency_penalty,
+                    repeat_penalty=repeat_penalty,
+                    tfs_z=tfs_z,
+                    mirostat_mode=mirostat_mode,
+                    mirostat_tau=mirostat_tau,
+                    mirostat_eta=mirostat_eta,
+                    model=model,
+                    logits_processor=logits_processor,
+                    grammar=grammar,
+                )
+                return _convert_completion_to_chat_function(function_call_name, completion, stream=True)
+            else:
+                stops = ["\n", END_ASSISTANT_TOKEN, START_FUNCTION_CALL_TOKEN]
+
+            completion = llama.create_completion(
+                prompt=prompt,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                min_p=min_p,
+                typical_p=typical_p,
+                stream=True,
+                stop=stops,
+                max_tokens=max_tokens,
+                presence_penalty=presence_penalty,
+                frequency_penalty=frequency_penalty,
+                repeat_penalty=repeat_penalty,
+                tfs_z=tfs_z,
+                mirostat_mode=mirostat_mode,
+                mirostat_tau=mirostat_tau,
+                mirostat_eta=mirostat_eta,
+                model=model,
+                logits_processor=logits_processor,
+                grammar=grammar,
+            )
+
+            text_chunks = []
+            def stream_content_and_capture():
+                for chunk in _convert_completion_to_chat(completion, stream=True):
+                    yield chunk
+                    if "content" in chunk["choices"][0]["delta"]:
+                        text_chunks.append(chunk["choices"][0]["delta"]["content"])
+
+            yield from stream_content_and_capture()
+
+            prompt += "".join(text_chunks)
+
+            # Peek to see if we stopped due to function call
+            peek = llama.create_completion(
+                 prompt=prompt,
+                 max_tokens=1,
+                 stop=[],
+                 stream=False
+            )
+            peek_text = peek["choices"][0]["text"]
+
+            if START_FUNCTION_CALL_TOKEN in peek_text:
+                prompt += peek_text
+                # Get function name
+                name_completion = llama.create_completion(
+                    prompt=prompt,
+                    stop=["\n"],
+                    stream=False
+                )
+                name_text = name_completion["choices"][0]["text"]
+                function_name = name_text.strip().rstrip(":")
+                prompt += name_text + "\n"
+
+                grammar = get_grammar(function_name)
+
+                args_completion = llama.create_completion(
+                    prompt=prompt,
+                    grammar=grammar,
+                    stream=True,
+                    stop=[END_FUNCTION_CALL_TOKEN],
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    min_p=min_p,
+                    typical_p=typical_p,
+                    max_tokens=max_tokens,
+                    presence_penalty=presence_penalty,
+                    frequency_penalty=frequency_penalty,
+                    repeat_penalty=repeat_penalty,
+                    tfs_z=tfs_z,
+                    mirostat_mode=mirostat_mode,
+                    mirostat_tau=mirostat_tau,
+                    mirostat_eta=mirostat_eta,
+                    model=model,
+                    logits_processor=logits_processor,
+                )
+                yield from _convert_completion_to_chat_function(function_name, args_completion, stream=True)
+            return
+
+        else: # V2
+            # Handle explicit cases first
+            if isinstance(function_call, str) and function_call == "none":
+                 prompt = prepare_messages_for_inference(messages, tokenizer, version, [], []) + "all\n<|content|>"
+                 completion = llama.create_completion(
+                     prompt=prompt,
+                     stop=[STOP_TOKEN],
+                     stream=True,
+                     temperature=temperature,
+                     top_p=top_p,
+                     top_k=top_k,
+                     min_p=min_p,
+                     typical_p=typical_p,
+                     max_tokens=max_tokens,
+                     presence_penalty=presence_penalty,
+                     frequency_penalty=frequency_penalty,
+                     repeat_penalty=repeat_penalty,
+                     tfs_z=tfs_z,
+                     mirostat_mode=mirostat_mode,
+                     mirostat_tau=mirostat_tau,
+                     mirostat_eta=mirostat_eta,
+                     model=model,
+                     logits_processor=logits_processor,
+                 )
+                 yield from _convert_completion_to_chat(completion, stream=True)
+                 return
+
+            if isinstance(function_call, dict):
+                 prompt += f"{function_call['name']}\n{CONTENT_TOKEN}"
+                 function_name = function_call['name']
+                 grammar = get_grammar(function_name)
+                 completion = llama.create_completion(
+                     prompt=prompt,
+                     grammar=grammar,
+                     stop=[STOP_TOKEN],
+                     stream=True,
+                     temperature=temperature,
+                     top_p=top_p,
+                     top_k=top_k,
+                     min_p=min_p,
+                     typical_p=typical_p,
+                     max_tokens=max_tokens,
+                     presence_penalty=presence_penalty,
+                     frequency_penalty=frequency_penalty,
+                     repeat_penalty=repeat_penalty,
+                     tfs_z=tfs_z,
+                     mirostat_mode=mirostat_mode,
+                     mirostat_tau=mirostat_tau,
+                     mirostat_eta=mirostat_eta,
+                     model=model,
+                     logits_processor=logits_processor,
+                 )
+                 yield from _convert_completion_to_chat_function(function_name, completion, stream=True)
+                 return
+
+            while True:
+                stops = [STOP_TOKEN, CONTENT_TOKEN]
+                completion = llama.create_completion(
+                    prompt=prompt,
+                    stop=stops,
+                    stream=False,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    min_p=min_p,
+                    typical_p=typical_p,
+                    max_tokens=max_tokens,
+                    presence_penalty=presence_penalty,
+                    frequency_penalty=frequency_penalty,
+                    repeat_penalty=repeat_penalty,
+                    tfs_z=tfs_z,
+                    mirostat_mode=mirostat_mode,
+                    mirostat_tau=mirostat_tau,
+                    mirostat_eta=mirostat_eta,
+                    model=model,
+                    logits_processor=logits_processor,
+                )
+                text = completion["choices"][0]["text"]
+                prompt += text
+
+                if text == "all":
+                    prompt += "\n" + CONTENT_TOKEN
+                    content_stream = llama.create_completion(
+                         prompt=prompt,
+                         stop=[STOP_TOKEN],
+                         stream=True,
+                         temperature=temperature,
+                         top_p=top_p,
+                         top_k=top_k,
+                         min_p=min_p,
+                         typical_p=typical_p,
+                         max_tokens=max_tokens,
+                         presence_penalty=presence_penalty,
+                         frequency_penalty=frequency_penalty,
+                         repeat_penalty=repeat_penalty,
+                         tfs_z=tfs_z,
+                         mirostat_mode=mirostat_mode,
+                         mirostat_tau=mirostat_tau,
+                         mirostat_eta=mirostat_eta,
+                         model=model,
+                         logits_processor=logits_processor,
+                    )
+                    yield from _convert_completion_to_chat(content_stream, stream=True)
+                    return
+
+                else: # Function call
+                    function_name = text.strip()
+                    prompt += "\n" + CONTENT_TOKEN
+                    grammar = get_grammar(function_name)
+
+                    args_stream = llama.create_completion(
+                        prompt=prompt,
+                        grammar=grammar,
+                        stream=True,
+                        stop=[STOP_TOKEN, "\n"],
+                        temperature=temperature,
+                        top_p=top_p,
+                        top_k=top_k,
+                        min_p=min_p,
+                        typical_p=typical_p,
+                        max_tokens=max_tokens,
+                        presence_penalty=presence_penalty,
+                        frequency_penalty=frequency_penalty,
+                        repeat_penalty=repeat_penalty,
+                        tfs_z=tfs_z,
+                        mirostat_mode=mirostat_mode,
+                        mirostat_tau=mirostat_tau,
+                        mirostat_eta=mirostat_eta,
+                        model=model,
+                        logits_processor=logits_processor,
+                    )
+
+                    captured_args = []
+                    def capture_and_yield(iterator, capture_list):
+                        for chunk in iterator:
+                            capture_list.append(chunk["choices"][0]["text"])
+                            yield chunk
+
+                    yield from _convert_completion_to_chat_function(
+                        function_name,
+                        capture_and_yield(args_stream, captured_args),
+                        stream=True
+                    )
+
+                    prompt += "".join(captured_args)
+                    grammar = None
+
+                    # Check next turn
+                    next_turn = llama.create_completion(
+                        prompt=prompt,
+                        stop=[STOP_TOKEN, RECIPIENT_TOKEN],
+                        max_tokens=10,
+                        stream=False
+                    )
+                    next_text = next_turn["choices"][0]["text"]
+                    if len(next_text) > 0:
+                        prompt += f"\n{FROM_TOKEN}assistant\n{RECIPIENT_TOKEN}"
+                    else:
+                        break
+            return
 
     function_calls, function_bodies = [], []
 
