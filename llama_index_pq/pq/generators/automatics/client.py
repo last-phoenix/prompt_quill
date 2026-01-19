@@ -13,7 +13,7 @@
 # permissions and limitations under the License.
 
 from datetime import datetime
-import urllib.request
+import requests
 import base64
 import json
 import time
@@ -39,6 +39,8 @@ class automa_client:
         self.webui_server_url = 'http://localhost:7860'
         self.g = globals.get_globals()
         self.prompt_enhancer = PromptEnhance()
+        self.session = requests.Session()
+        self.session.headers.update({'Content-Type': 'application/json'})
 
 
     def timestamp(self):
@@ -56,16 +58,11 @@ class automa_client:
 
 
     def call_api(self,api_endpoint, **payload):
-        data = json.dumps(payload).encode('utf-8')
-        request = urllib.request.Request(
-            f'{self.webui_server_url}/{api_endpoint}',
-            headers={'Content-Type': 'application/json'},
-            data=data,
-            method='POST'
-        )
+        url = f'{self.webui_server_url}/{api_endpoint}'
         try:
-            response = urllib.request.urlopen(request)
-            return json.loads(response.read().decode('utf-8'))
+            response = self.session.post(url, json=payload)
+            response.raise_for_status()
+            return response.json()
         except Exception as e:
             print(e)
             return ''
@@ -238,14 +235,11 @@ class automa_client:
 
 
     def get_api_endpoint(self,api_endpoint):
-        request = urllib.request.Request(
-            f'{self.webui_server_url}/{api_endpoint}',
-            headers={'Content-Type': 'application/json'}
-        )
-
+        url = f'{self.webui_server_url}/{api_endpoint}'
         try:
-            response = urllib.request.urlopen(request)
-            return json.loads(response.read().decode('utf-8'))
+            response = self.session.get(url)
+            response.raise_for_status()
+            return response.json()
         except Exception as e:
             print(e)
             return ''
@@ -253,14 +247,9 @@ class automa_client:
 
     def post_api_endpoint(self,api_endpoint):
         endpoint = f"{self.webui_server_url}/{api_endpoint}"  # Assuming webui_server_url exists
-        request = urllib.request.Request(
-            endpoint,
-            data=b'{}',  # Empty JSON payload—forces POST
-            headers={'Content-Type': 'application/json'},
-            method='POST'  # Explicit POST
-        )
         try:
-            response = urllib.request.urlopen(request)
+            response = self.session.post(endpoint, json={})
+            response.raise_for_status()
         except Exception as e:
             print(e)
             return ''
