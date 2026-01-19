@@ -297,7 +297,15 @@ class _LlamaContext:
 
     # TODO: llama_load_session_file
 
-    # TODO: llama_save_session_file
+    def llama_save_session_file(self, path_session: str, tokens: List[int]) -> int:
+        assert self.ctx is not None
+        c_tokens = (llama_cpp.llama_token * len(tokens))(*tokens)
+        return llama_cpp.llama_save_session_file(
+            self.ctx,
+            path_session.encode("utf-8"),
+            c_tokens,
+            len(tokens),
+        )
 
     def decode(self, batch: "_LlamaBatch"):
         assert self.ctx is not None
