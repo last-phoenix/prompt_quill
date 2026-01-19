@@ -1508,15 +1508,31 @@ class SchemaConverter:
 
             return self._add_rule(rule_name, rule)
 
-        elif schema_type == "array" and "items" in schema:
-            # TODO `prefixItems` keyword
-            item_rule_name = self.visit(
-                schema["items"], f'{name}{"-" if name else ""}item'
-            )
-            rule = (
-                f'"[" space ({item_rule_name} ("," space {item_rule_name})*)? "]" space'
-            )
-            return self._add_rule(rule_name, rule)
+        elif schema_type == "array" and ("items" in schema or "prefixItems" in schema):
+            new_rule = '"[" space'
+            prefix_items = schema.get("prefixItems", [])
+            prefix_rule_names = []
+            for i, p_schema in enumerate(prefix_items):
+                prefix_rule_names.append(self.visit(
+                    p_schema, f'{name}{"-" if name else ""}tuple-{i}'
+                ))
+
+            for i, p_rule in enumerate(prefix_rule_names):
+                if i > 0:
+                    new_rule += ' "," space'
+                new_rule += f' {p_rule}'
+
+            if "items" in schema:
+                item_rule_name = self.visit(
+                    schema["items"], f'{name}{"-" if name else ""}item'
+                )
+                if len(prefix_items) > 0:
+                    new_rule += f' ("," space {item_rule_name})*'
+                else:
+                    new_rule += f' ({item_rule_name} ("," space {item_rule_name})*)?'
+
+            new_rule += ' "]" space'
+            return self._add_rule(rule_name, new_rule)
 
         else:
             assert schema_type in PRIMITIVE_RULES, f"Unrecognized schema: {schema}"
