@@ -291,9 +291,20 @@ class _LlamaContext:
         assert self.ctx is not None
         return llama_cpp.llama_get_state_size(self.ctx)
 
-    # TODO: copy_state_data
+    def get_state_data(self) -> bytes:
+        assert self.ctx is not None
+        state_size = self.get_state_size()
+        c_state_data = (ctypes.c_uint8 * state_size)()
+        llama_cpp.llama_copy_state_data(self.ctx, c_state_data)
+        return bytes(c_state_data)
 
-    # TODO: set_state_data
+    def set_state_data(self, state_data: bytes):
+        assert self.ctx is not None
+        state_size = self.get_state_size()
+        if len(state_data) != state_size:
+            raise ValueError(f"Expected state data of size {state_size}, got {len(state_data)}")
+        c_state_data = (ctypes.c_uint8 * len(state_data)).from_buffer_copy(state_data)
+        llama_cpp.llama_set_state_data(self.ctx, c_state_data)
 
     # TODO: llama_load_session_file
 
