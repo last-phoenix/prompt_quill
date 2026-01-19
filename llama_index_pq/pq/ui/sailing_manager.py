@@ -166,7 +166,7 @@ class SailingManager:
                 images.append(img)
         return images
 
-    def get_new_prompt(self, query, n, prompt_discard_count, sail_steps, filename, sail_keep_text=False, retry_count=0):
+    def get_new_prompt(self, query, n, prompt_discard_count, sail_steps, filename, sail_keep_text=False, retry_count=0, cached_nodes=None, query_vector=None):
         prompt = ''
         processor = shared.WildcardResolver()
         # if LLM enabled
@@ -183,7 +183,19 @@ class SailingManager:
                         self.g.sail_history.append(prompt)
                         break
                     n += 1
-                    new_nodes = self.interface.direct_search(self.g.settings_data['sailing']['sail_text'], self.g.settings_data['sailing']['sail_depth'], n)
+
+                    sail_depth = self.g.settings_data['sailing']['sail_depth']
+                    sail_depth_preset = self.g.settings_data['sailing']['sail_depth_preset']
+
+                    if cached_nodes and n*sail_depth + sail_depth <= len(cached_nodes):
+                        # Matches direct_search(n) behavior:
+                        # cached_nodes index `n*depth` corresponds to offset `preset + (n+1)*depth`.
+                        new_nodes = cached_nodes[n*sail_depth : n*sail_depth + sail_depth]
+                    elif query_vector:
+                         new_nodes = self.interface.search_by_vector(query_vector, sail_depth, sail_depth_preset+((n+1)*sail_depth))
+                    else:
+                        new_nodes = self.interface.direct_search(self.g.settings_data['sailing']['sail_text'], sail_depth, n)
+
                     query = self.get_next_target_new(new_nodes)
                     prompt_discard_count += 1
                     sail_steps += 1
@@ -221,9 +233,16 @@ class SailingManager:
                 print(f'empty or too short prompt will retry {10 - retry_count} times, each retry fetches a new query and so dives deeper into the data')
                 n += 1
                 retry_count += 1
-                new_nodes = self.interface.direct_search(self.g.settings_data['sailing']['sail_text'], self.g.settings_data['sailing']['sail_depth'], n)
+
+                if cached_nodes and (n-1)*self.g.settings_data['sailing']['sail_depth'] + self.g.settings_data['sailing']['sail_depth'] <= len(cached_nodes):
+                    new_nodes = cached_nodes[(n-1)*self.g.settings_data['sailing']['sail_depth'] : (n-1)*self.g.settings_data['sailing']['sail_depth'] + self.g.settings_data['sailing']['sail_depth']]
+                elif query_vector:
+                     new_nodes = self.interface.search_by_vector(query_vector, self.g.settings_data['sailing']['sail_depth'], self.g.settings_data['sailing']['sail_depth_preset']+((n+1)*self.g.settings_data['sailing']['sail_depth']))
+                else:
+                    new_nodes = self.interface.direct_search(self.g.settings_data['sailing']['sail_text'], self.g.settings_data['sailing']['sail_depth'], n)
+
                 query = self.get_next_target_new(new_nodes)
-                return self.get_new_prompt(query, n, prompt_discard_count, sail_steps, filename, sail_keep_text, retry_count)
+                return self.get_new_prompt(query, n, prompt_discard_count, sail_steps, filename, sail_keep_text, retry_count, cached_nodes, query_vector)
 
         self.sail_log = self.log_prompt(filename, prompt, orig_prompt, n, self.sail_log)
         return prompt.strip(), orig_prompt.strip(), n, prompt_discard_count, sail_steps
@@ -358,10 +377,30 @@ class SailingManager:
         prompt_discard_count = 0
         n = 1
         sail_steps = self.g.settings_data['sailing']['sail_width']
+
+        cached_nodes = None
+        query_vector = None
+
         #if LLM enabled
         if self.g.settings_data['sailing']['sail_wildcards_only']:
+            sail_depth = self.g.settings_data['sailing']['sail_depth']
+            sail_depth_preset = self.g.settings_data['sailing']['sail_depth_preset']
+
             context_count = self.interface.count_context().count
-            possible_images = int(context_count / self.g.settings_data['sailing']['sail_depth']) - int(self.g.settings_data['sailing']['sail_depth_preset'] / self.g.settings_data['sailing']['sail_depth'])
+            possible_images = int(context_count / sail_depth) - int(sail_depth_preset / sail_depth)
+
+            # Optimization: Pre-compute vector and fetch batch
+            try:
+                query_vector = self.interface.get_query_embedding(self.g.settings_data['sailing']['sail_text'])
+                if not self.g.settings_data['sailing']['sail_sinus']:
+                    # We fetch (sail_steps + 1) batches of size sail_depth.
+                    # Start offset matches direct_search(n=0) -> preset + 1*limit.
+                    total_limit = (sail_steps + 1) * sail_depth
+                    start_offset = sail_depth_preset + sail_depth
+                    cached_nodes = self.interface.search_by_vector(query_vector, total_limit, start_offset)
+            except Exception as e:
+                print(f"Optimization setup failed: {e}")
+
         else:
             context_count = sail_steps
             possible_images = sail_steps
@@ -371,7 +410,18 @@ class SailingManager:
 
         #if LLM enabled
         if self.g.settings_data['sailing']['sail_wildcards_only']:
-            new_nodes = self.interface.direct_search(query, self.g.settings_data['sailing']['sail_depth'], 0)
+            sail_depth = self.g.settings_data['sailing']['sail_depth']
+            sail_depth_preset = self.g.settings_data['sailing']['sail_depth_preset']
+
+            if cached_nodes and sail_depth <= len(cached_nodes):
+                # Matches direct_search(0) which uses offset = preset + (0+1)*depth = preset + 1*depth
+                new_nodes = cached_nodes[0 : sail_depth]
+            elif query_vector:
+                # Matches direct_search(0) behavior
+                new_nodes = self.interface.search_by_vector(query_vector, sail_depth, sail_depth_preset + sail_depth)
+            else:
+                new_nodes = self.interface.direct_search(query, sail_depth, 0)
+
             query = self.get_next_target_new(new_nodes)
 
         while n < sail_steps + 1:
@@ -381,11 +431,21 @@ class SailingManager:
                     yield self.sail_log, [], 'Something went wrong, there is no valid query anymore'
                     break
 
-                prompt, orig_prompt, n, prompt_discard_count, sail_steps = self.get_new_prompt(query, n, prompt_discard_count, sail_steps, filename, self.g.settings_data['sailing']['sail_keep_text'])
+                prompt, orig_prompt, n, prompt_discard_count, sail_steps = self.get_new_prompt(query, n, prompt_discard_count, sail_steps, filename, self.g.settings_data['sailing']['sail_keep_text'], cached_nodes=cached_nodes, query_vector=query_vector)
 
                 #if LLM enabled
                 if self.g.settings_data['sailing']['sail_wildcards_only']:
-                    new_nodes = self.interface.direct_search(self.g.settings_data['sailing']['sail_text'], self.g.settings_data['sailing']['sail_depth'], n)
+                    sail_depth = self.g.settings_data['sailing']['sail_depth']
+                    sail_depth_preset = self.g.settings_data['sailing']['sail_depth_preset']
+
+                    if cached_nodes and n*sail_depth + sail_depth <= len(cached_nodes):
+                        # Matches direct_search(n) behavior:
+                        # cached_nodes index `n*depth` corresponds to offset `preset + (n+1)*depth`.
+                        new_nodes = cached_nodes[n*sail_depth : n*sail_depth + sail_depth]
+                    elif query_vector:
+                        new_nodes = self.interface.search_by_vector(query_vector, sail_depth, sail_depth_preset + ((n+1)*sail_depth))
+                    else:
+                        new_nodes = self.interface.direct_search(self.g.settings_data['sailing']['sail_text'], sail_depth, n)
 
                 if self.g.settings_data['sailing']['sail_generate']:
                     if self.g.settings_data['sailing']['sail_gen_rephrase']:
