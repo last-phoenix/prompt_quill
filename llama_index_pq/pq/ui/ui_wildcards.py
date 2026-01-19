@@ -2,6 +2,7 @@ import gradio as gr
 import os
 from pathlib import Path
 import globals
+from wildcard_manager import WildcardManager
 
 g = globals.get_globals()
 WILDCARD_DIR = Path("wildcards")
@@ -10,19 +11,8 @@ WILDCARD_DIR = Path("wildcards")
 if not WILDCARD_DIR.exists():
     WILDCARD_DIR.mkdir(parents=True)
 
-# Initialize wildcard cache in settings_data
-if 'wildcard_cache' not in g.settings_data:
-    g.settings_data['wildcard_cache'] = {}
-    for file_path in WILDCARD_DIR.glob("**/*.txt"):
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                content = f.read()
-            # Use only the filename, no folder or extension
-            filename = file_path.stem  # 'negative_hand-neg' from 'embeddings/negative_hand-neg.txt'
-            wildcard_syntax = f"__{filename}__"
-            g.settings_data['wildcard_cache'][wildcard_syntax] = content.lower()
-        except Exception:
-            pass
+if not hasattr(g, 'wildcard_manager'):
+    g.wildcard_manager = WildcardManager()
 
 # --- Shared Functions ---
 def get_subfolders():
@@ -74,7 +64,7 @@ def save_edited_file(selected_file, new_content):
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(new_content)
         wildcard_syntax = selected_file.split(" (")[0]
-        g.settings_data['wildcard_cache'][wildcard_syntax] = new_content.lower()
+        g.wildcard_manager.update_file(wildcard_syntax, new_content)
         return f"Changes saved to '{file_path}'"
     except Exception as e:
         return f"Error saving changes: {str(e)}"
@@ -115,7 +105,7 @@ def save_wildcard_file(filename, content, subfolder, overwrite):
             f.write(content)
         relative_path = target_path.relative_to(WILDCARD_DIR)
         wildcard_syntax = f"__{str(relative_path).replace(os.sep, '/').replace('.txt', '')}__"
-        g.settings_data['wildcard_cache'][wildcard_syntax] = content.lower()
+        g.wildcard_manager.update_file(wildcard_syntax, content)
         if is_new_folder and subfolder:
             return f"New subfolder '{subfolder}' created! Click 'Refresh Subfolders' to update. File saved: {target_path}"
         return f"File saved successfully: {target_path}"

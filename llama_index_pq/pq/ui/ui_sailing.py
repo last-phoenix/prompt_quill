@@ -3,26 +3,15 @@ import globals
 from pathlib import Path
 import os
 import re
+from wildcard_manager import WildcardManager
 
 g = globals.get_globals()
+
+if not hasattr(g, 'wildcard_manager'):
+    g.wildcard_manager = WildcardManager()
+
 from .ui_helpers import create_textbox, create_checkbox, create_slider, create_dropdown, create_button, create_gallery
 
-# Initialize wildcard cache in settings_data
-if 'wildcard_cache' not in g.settings_data:
-    g.settings_data['wildcard_cache'] = {}
-    WILDCARD_DIR = Path("wildcards")
-    for file_path in WILDCARD_DIR.glob("**/*.txt"):
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                content = f.read()
-            # Use only the filename, no folder or extension
-            filename = file_path.stem  # 'negative_hand-neg' from 'embeddings/negative_hand-neg.txt'
-            wildcard_syntax = f"__{filename}__"
-            g.settings_data['wildcard_cache'][wildcard_syntax] = content.lower()
-        except Exception:
-            pass
-
-import re
 
 def get_wildcard_suggestions(text, enable_suggestions, phrase_cap):
     if not enable_suggestions or not text:
@@ -46,8 +35,7 @@ def get_wildcard_suggestions(text, enable_suggestions, phrase_cap):
     print(f"Last few words (cap {phrase_cap}): '{last_few_words}'")
 
     # Get suggestions for each
-    last_word_suggestions = [w for w, c in g.settings_data['wildcard_cache'].items() if last_word in c]
-    last_few_suggestions = [w for w, c in g.settings_data['wildcard_cache'].items() if last_few_words in c]
+    last_word_suggestions, last_few_suggestions = g.wildcard_manager.get_suggestions(last_word, last_few_words)
     # full_text_suggestions = [w for w, c in g.settings_data['wildcard_cache'].items() if full_text in c]  # Optional, dropping for now
 
     # Clean and limit to 5 each, exclude overlaps from last_few in last_word
