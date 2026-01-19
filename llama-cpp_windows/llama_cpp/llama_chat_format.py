@@ -433,19 +433,11 @@ def hf_tokenizer_config_to_chat_formatter(
         messages: List[llama_types.ChatCompletionRequestMessage],
         **kwargs: Any,
     ) -> ChatFormatterResponse:
-        # TODO: veryify this is correct
-        # Add a blank assistant message to the end of the messages to prompt the model to generate a response
-        if add_generation_prompt:
-            messages = [
-                *messages,
-                llama_types.ChatCompletionRequestAssistantMessage(
-                    role="assistant", content=""
-                ),
-            ]
         prompt = env.render(
             messages=messages,
             bos_token=bos_token,
             eos_token=eos_token,
+            add_generation_prompt=add_generation_prompt,
         )
         return ChatFormatterResponse(prompt=prompt, stop=[eos_token, bos_token])
 
