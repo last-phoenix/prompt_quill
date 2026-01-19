@@ -1295,12 +1295,25 @@ class Llama:
                 for token in all_tokens
             ]
             all_logprobs = Llama.logits_to_logprobs(self._scores)[token_offset:]
-            # TODO: may be able to change this loop to use np.take_along_dim
-            for idx, (token, token_str, logprobs_token) in enumerate(
-                zip(all_tokens, all_token_strs, all_logprobs)
-            ):
-                if token == self.token_bos():
-                    continue
+
+            all_tokens_np = np.array(all_tokens)
+            valid_indices = np.where(all_tokens_np != self.token_bos())[0]
+
+            token_indices = all_tokens_np.reshape(-1, 1)
+            extracted_logprobs = np.take_along_axis(all_logprobs, token_indices, axis=1).flatten()
+
+            top_k_indices_unsorted = np.argpartition(all_logprobs, -logprobs, axis=1)[:, -logprobs:]
+            top_k_logprobs_unsorted = np.take_along_axis(all_logprobs, top_k_indices_unsorted, axis=1)
+
+            sorted_indices_in_top_k = np.argsort(top_k_logprobs_unsorted, axis=1)[:, ::-1]
+
+            final_top_k_logprobs = np.take_along_axis(top_k_logprobs_unsorted, sorted_indices_in_top_k, axis=1)
+            final_top_k_indices = np.take_along_axis(top_k_indices_unsorted, sorted_indices_in_top_k, axis=1)
+
+            for idx in valid_indices:
+                token = all_tokens[idx]
+                token_str = all_token_strs[idx]
+
                 text_offsets.append(
                     text_offset
                     + len(
@@ -1310,17 +1323,18 @@ class Llama:
                     )
                 )
                 tokens.append(token_str)
-                sorted_logprobs = list(
-                    sorted(
-                        zip(logprobs_token, range(len(logprobs_token))), reverse=True
-                    )
-                )
-                token_logprobs.append(logprobs_token[int(token)])
+
+                current_token_logprob = extracted_logprobs[idx]
+                token_logprobs.append(current_token_logprob)
+
+                current_top_indices = final_top_k_indices[idx]
+                current_top_vals = final_top_k_logprobs[idx]
+
                 top_logprob: Optional[Dict[str, float]] = {
                     self.detokenize([i]).decode("utf-8", errors="ignore"): logprob
-                    for logprob, i in sorted_logprobs[:logprobs]
+                    for logprob, i in zip(current_top_vals, current_top_indices)
                 }
-                top_logprob.update({token_str: logprobs_token[int(token)]})
+                top_logprob.update({token_str: current_token_logprob})
                 top_logprobs.append(top_logprob)
             # Weird idosincracy of the OpenAI API where
             # token_logprobs and top_logprobs are null for
