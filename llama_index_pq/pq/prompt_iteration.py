@@ -369,17 +369,8 @@ class prompt_iterator:
 
 		# Iterate for the length of the longest array
 		for i in range(len(longest_array)):
-			line = ""
-			# Loop through each sub-array
-			for arr in data:
-				# Calculate the effective index for the current sub-array
-				index = i % len(arr)
-				# Add element if it exists, otherwise pad with a space
-				if index < len(arr):
-					line += str(arr[index]) + " "
-				else:
-					line += "  "  # Add two spaces for padding
-			# Remove trailing space
-			formatted_lines.append(line.rstrip())
+			# Loop through each sub-array and join elements with a space
+			line = " ".join(str(arr[i % len(arr)]) for arr in data)
+			formatted_lines.append(line)
 
 		return formatted_lines
