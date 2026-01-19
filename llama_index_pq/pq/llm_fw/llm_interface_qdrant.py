@@ -190,6 +190,12 @@ class _LLM_INTERFACE:
     def direct_search(self,query,limit,offset):
         return self.adapter.direct_search(query,limit,offset)
 
+    def get_query_embedding(self, query):
+        return self.adapter.get_query_embedding(query)
+
+    def search_by_vector(self, vector, limit, offset):
+        return self.adapter.search_by_vector(vector, limit, offset)
+
 
     def count_context(self):
         return self.adapter.count_context()

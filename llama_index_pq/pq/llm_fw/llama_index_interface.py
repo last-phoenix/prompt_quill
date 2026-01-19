@@ -221,6 +221,22 @@ class adapter:
                                             )
         return result
 
+    def get_query_embedding(self, query):
+        self.check_llm_loaded()
+        return self.embed_model.get_text_embedding(query)
+
+    def search_by_vector(self, vector, limit, offset):
+        self.check_llm_loaded()
+        filter = self.get_context_filter()
+        result = self.document_store.search(collection_name=self.g.settings_data['collection'],
+                                   query_vector=vector,
+                                   limit=limit,
+                                   offset=offset,
+                                   query_filter=filter,
+                                   search_params=SearchParams(hnsw_ef=128, exact=False),
+                                   )
+        return result
+
     def direct_search(self,query,limit,offset,context_retrieve=False):
         self.check_llm_loaded()
 
