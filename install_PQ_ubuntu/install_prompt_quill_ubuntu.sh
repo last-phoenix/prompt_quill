@@ -51,12 +51,31 @@ docker_compose() {
 	fi
 }
 
+detect_package_manager() {
+	if command -v apt-get >/dev/null; then echo "apt";
+	elif command -v dnf >/dev/null; then echo "dnf";
+	elif command -v pacman >/dev/null; then echo "pacman";
+	elif command -v zypper >/dev/null; then echo "zypper";
+	else echo "unknown"; fi
+}
+
 check_prereqs() {
 	log "Checking prerequisites"
 	require_cmd "${PYTHON_BIN}"
 	require_cmd curl
 	require_cmd unzip
-	require_cmd docker
+
+	if ! command -v docker >/dev/null 2>&1; then
+		local pm
+		pm=$(detect_package_manager)
+		case "${pm}" in
+			apt) fail "Docker not found. Install via 'sudo apt install docker.io' (or follow official Docker docs)." ;;
+			dnf) fail "Docker not found. Install via 'sudo dnf install docker'." ;;
+			pacman) fail "Docker not found. Install via 'sudo pacman -S docker'." ;;
+			*) fail "Docker not found. Please install Docker Engine." ;;
+		esac
+	fi
+
 	[[ -d "${LLAMA_DIR}" ]] || fail "Cannot find ${LLAMA_DIR}. Run the script from the repository root."
 
 	if ! groups "$USER" | grep -qw docker; then
@@ -69,7 +88,16 @@ create_venv() {
 		log "Virtual environment already exists at ${VENV_DIR}, skipping creation."
 	else
 		log "Creating virtual environment in ${VENV_DIR}"
-		"${PYTHON_BIN}" -m venv "${VENV_DIR}" || fail "python3-venv is required. Install via 'sudo apt install python3-venv'."
+		if ! "${PYTHON_BIN}" -m venv "${VENV_DIR}"; then
+			local pm
+			pm=$(detect_package_manager)
+			case "${pm}" in
+				apt) fail "python3-venv is required. Install via 'sudo apt install python3-venv' (or similar depending on python version)." ;;
+				dnf) fail "python3-venv is required. Install via 'sudo dnf install python3-virtualenv' or check your python package." ;;
+				pacman) fail "python3-venv is required. Install via 'sudo pacman -S python' (usually included)." ;;
+				*) fail "python3-venv is required. Please install it using your package manager." ;;
+			esac
+		fi
 	fi
 }
 

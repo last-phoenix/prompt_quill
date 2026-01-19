@@ -56,10 +56,11 @@ class _LLM_INTERFACE:
 
 
     def log(self, logfile, message):  # Assuming this is a method in a class
-        # If logfile is just a filename (no path), default to script's directory
+        # If logfile is just a filename (no path), use paths.log_dir
         if not os.path.isabs(logfile) and '\\' not in logfile and '/' not in logfile:
-            base_dir = os.path.dirname(os.path.abspath(__file__))  # Directory of llm_interface_qdrant.py
-            logfile = os.path.join(base_dir, logfile)
+            import path_manager
+            paths = path_manager.paths
+            logfile = os.path.join(paths.log_dir, logfile)
 
         # Get directory and ensure it exists
         log_dir = os.path.dirname(logfile)
