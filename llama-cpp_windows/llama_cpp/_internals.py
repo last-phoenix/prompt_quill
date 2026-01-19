@@ -687,6 +687,7 @@ class _LlamaSamplingContext:
     # NOTE: Missing parsed_grammar
     prev: list[int] = field(default_factory=list)
     cur: list[llama_cpp.llama_token_data] = field(default_factory=list)
+    token_data_array: Optional[_LlamaTokenDataArray] = None
 
     def reset(self):
         self.prev = []
@@ -729,9 +730,10 @@ class _LlamaSamplingContext:
         for token, logit_bias in self.params.logit_bias.items():
             logits_array[token] += logit_bias
 
-        token_data_array = _LlamaTokenDataArray(
-            n_vocab=n_vocab
-        )  # TODO: Only create this once
+        if self.token_data_array is None or self.token_data_array.n_vocab != n_vocab:
+            self.token_data_array = _LlamaTokenDataArray(n_vocab=n_vocab)
+
+        token_data_array = self.token_data_array
         token_data_array.copy_logits(logits_array)
 
         if ctx_cfg is not None:
