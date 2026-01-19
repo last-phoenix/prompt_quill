@@ -61,6 +61,8 @@ class adapter:
         #self.set_pipeline()
         self.last_context = []
         self.prompt_array_index = {}
+        self.last_search_query = None
+        self.last_search_vector = None
 
 
 
@@ -145,6 +147,8 @@ class adapter:
         self.query_engine.update_prompts(
             {"response_synthesizer:text_qa_template": self.qa_prompt_tmpl}
         )
+        self.last_search_query = None
+        self.last_search_vector = None
 
 
     def filter_context(self, nodes,context_retrieve):
@@ -240,7 +244,12 @@ class adapter:
     def direct_search(self,query,limit,offset,context_retrieve=False):
         self.check_llm_loaded()
 
-        vector = self.embed_model.get_text_embedding(query)
+        if self.last_search_query == query:
+            vector = self.last_search_vector
+        else:
+            vector = self.embed_model.get_text_embedding(query)
+            self.last_search_query = query
+            self.last_search_vector = vector
 
         filter = self.get_context_filter()
 
