@@ -493,6 +493,16 @@ Given the context information and not prior knowledge,\n""" + self.g.settings_da
         return f'Model set to {model["name"]}'
 
     def log(self,logfile, text):
+        if not os.path.isabs(logfile) and '\\' not in logfile and '/' not in logfile:
+            import path_manager
+            paths = path_manager.paths
+            logfile = os.path.join(paths.log_dir, logfile)
+
+        # Ensure dir exists
+        log_dir = os.path.dirname(logfile)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
+
         f = open(logfile, 'a')
         try:
             f.write(f"{text}\n")

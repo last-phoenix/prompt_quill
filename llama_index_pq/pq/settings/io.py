@@ -5,13 +5,16 @@ from pathlib import Path
 
 from .defaults import default
 from .check_file_name import is_path_exists_or_creatable_portable
+import path_manager
+paths = path_manager.paths
+
 class settings_io:
 
 
     def __init__(self):
         self.default = default
         self.settings = self.default
-        self.settings_dir = Path(__file__).resolve().parent
+        self.settings_dir = paths.config_dir
 
 
     def get_defaults(self):
@@ -114,7 +117,7 @@ class settings_io:
             return 'Filename not OK'
 
     def load_prompt_data(self):
-        data_file = self.settings_dir / 'data.json'
+        data_file = paths.data_dir / 'data.json'
         if data_file.is_file():
             with data_file.open('r') as f:
                 self.prompt_iteration_raw = json.loads(f.read())

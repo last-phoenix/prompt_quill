@@ -47,7 +47,7 @@ services:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
     volumes:
-      - G:\\prompt_work\\milvus\\milvus.yaml:/milvus/configs/milvus.yaml type:bind # Map the local path to the container path
+      - ./milvus.yaml:/milvus/configs/milvus.yaml # Map the local path to the container path
       - llmware-milvus:/var/lib/milvus
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
