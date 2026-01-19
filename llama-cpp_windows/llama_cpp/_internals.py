@@ -291,9 +291,13 @@ class _LlamaContext:
         assert self.ctx is not None
         return llama_cpp.llama_get_state_size(self.ctx)
 
-    # TODO: copy_state_data
+    def copy_state_data(self, dst: ctypes.Array[ctypes.c_uint8]) -> int:
+        assert self.ctx is not None
+        return llama_cpp.llama_copy_state_data(self.ctx, dst)
 
-    # TODO: set_state_data
+    def set_state_data(self, src: ctypes.Array[ctypes.c_uint8]) -> int:
+        assert self.ctx is not None
+        return llama_cpp.llama_set_state_data(self.ctx, src)
 
     # TODO: llama_load_session_file
 
