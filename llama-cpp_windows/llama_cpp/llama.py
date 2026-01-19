@@ -357,10 +357,6 @@ class Llama:
             (n_ctx, self._n_vocab), dtype=np.single
         )
 
-        self._mirostat_mu = ctypes.c_float(
-            2.0 * 5.0
-        )  # TODO: Move this to sampling context
-
         try:
             self.metadata = self._model.metadata()
         except Exception as e:
@@ -532,6 +528,7 @@ class Llama:
         penalize_nl: bool = True,
         logits_processor: Optional[LogitsProcessorList] = None,
         grammar: Optional[LlamaGrammar] = None,
+        mirostat_mu: Optional[ctypes.c_float] = None,
         idx: Optional[int] = None,
     ):
         """Sample a token from the model.
@@ -576,9 +573,14 @@ class Llama:
             mirostat_eta=mirostat_eta,
             penalize_nl=penalize_nl,
         )
+
+        if mirostat_mu is None:
+            mirostat_mu = ctypes.c_float(2.0 * mirostat_tau)
+
         sampling_context = _LlamaSamplingContext(
             params=sampling_params,
             grammar=grammar,
+            mirostat_mu=mirostat_mu,
         )
         sampling_context.prev = list(self.eval_tokens)
         id = sampling_context.sample(ctx_main=self._ctx, logits_array=logits)
@@ -630,7 +632,7 @@ class Llama:
             The generated tokens.
         """
         # Reset mirostat sampling
-        self._mirostat_mu = ctypes.c_float(2.0 * mirostat_tau)
+        mirostat_mu = ctypes.c_float(2.0 * mirostat_tau)
 
         # Check for kv cache prefix match
         if reset and self.n_tokens > 0:
@@ -677,6 +679,7 @@ class Llama:
                     mirostat_eta=mirostat_eta,
                     logits_processor=logits_processor,
                     grammar=grammar,
+                    mirostat_mu=mirostat_mu,
                     penalize_nl=penalize_nl,
                     idx=sample_idx,
                 )
