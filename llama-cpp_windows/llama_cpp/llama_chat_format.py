@@ -2672,7 +2672,26 @@ def chatml_function_calling(
             completion: llama_types.CreateCompletionResponse = completion_or_chunks  # type: ignore
             assert "usage" in completion
             tool_id = "call_" + "_0_" + tool_name + "_" + completion["id"]
-            # TODO: Fix for legacy function calls
+            message: llama_types.ChatCompletionResponseMessage = {
+                "role": "assistant",
+                "content": None,
+            }
+            if functions is not None:
+                message["function_call"] = {
+                    "name": tool_name,
+                    "arguments": completion["choices"][0]["text"],
+                }
+            else:
+                message["tool_calls"] = [
+                    {
+                        "id": tool_id,
+                        "type": "function",
+                        "function": {
+                            "name": tool_name,
+                            "arguments": completion["choices"][0]["text"],
+                        },
+                    }
+                ]
             chat_completion: llama_types.CreateChatCompletionResponse = {
                 "id": "chat" + completion["id"],
                 "object": "chat.completion",
@@ -2681,24 +2700,7 @@ def chatml_function_calling(
                 "choices": [
                     {
                         "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": None,
-                            "function_call": {
-                                "name": tool_name,
-                                "arguments": completion["choices"][0]["text"],
-                            },
-                            "tool_calls": [
-                                {
-                                    "id": tool_id,
-                                    "type": "function",
-                                    "function": {
-                                        "name": tool_name,
-                                        "arguments": completion["choices"][0]["text"],
-                                    },
-                                }
-                            ],
-                        },
+                        "message": message,
                         "finish_reason": "tool_calls",
                     }
                 ],
@@ -2742,6 +2744,27 @@ def chatml_function_calling(
                                 }
                             ],
                         }
+                        delta: llama_types.ChatCompletionStreamResponseDelta = {
+                            "role": None,
+                            "content": None,
+                        }
+                        if functions is not None:
+                            delta["function_call"] = {
+                                "name": tool_name,
+                                "arguments": chunk["choices"][0]["text"],
+                            }
+                        else:
+                            delta["tool_calls"] = [
+                                {
+                                    "index": 0,
+                                    "id": tool_id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": tool_name,
+                                        "arguments": "",
+                                    },
+                                }
+                            ]
                         yield {
                             "id": "chat" + chunk["id"],
                             "object": "chat.completion.chunk",
@@ -2752,31 +2775,34 @@ def chatml_function_calling(
                                     "index": 0,
                                     "finish_reason": None,
                                     "logprobs": None,
-                                    "delta": {
-                                        "role": None,
-                                        "content": None,
-                                        "function_call": {
-                                            "name": tool_name,
-                                            "arguments": chunk["choices"][0]["text"],
-                                        },
-                                        "tool_calls": [
-                                            {
-                                                "index": 0,
-                                                "id": tool_id,
-                                                "type": "function",
-                                                "function": {
-                                                    "name": tool_name,
-                                                    "arguments": "",
-                                                },
-                                            }
-                                        ],
-                                    },
+                                    "delta": delta,
                                 }
                             ],
                         }
                         first = False
                         continue
                     assert tool_id is not None
+                    delta = {
+                        "role": None,
+                        "content": None,
+                    }
+                    if functions is not None:
+                        delta["function_call"] = {
+                            "name": tool_name,
+                            "arguments": chunk["choices"][0]["text"],
+                        }
+                    else:
+                        delta["tool_calls"] = [
+                            {
+                                "index": 0,
+                                "id": tool_id,
+                                "type": "function",
+                                "function": {
+                                    "name": tool_name,
+                                    "arguments": chunk["choices"][0]["text"],
+                                },
+                            }
+                        ]
                     yield {
                         "id": "chat" + chunk["id"],
                         "object": "chat.completion.chunk",
@@ -2787,27 +2813,7 @@ def chatml_function_calling(
                                 "index": 0,
                                 "finish_reason": None,
                                 "logprobs": None,
-                                "delta": {
-                                    "role": None,
-                                    "content": None,
-                                    "function_call": {
-                                        "name": tool_name,
-                                        "arguments": chunk["choices"][0]["text"],
-                                    },
-                                    "tool_calls": [
-                                        {
-                                            "index": 0,
-                                            "id": tool_id,
-                                            "type": "function",
-                                            "function": {
-                                                "name": tool_name,
-                                                "arguments": chunk["choices"][0][
-                                                    "text"
-                                                ],
-                                            },
-                                        }
-                                    ],
-                                },
+                                "delta": delta,
                             }
                         ],
                     }
