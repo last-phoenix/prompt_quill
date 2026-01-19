@@ -204,7 +204,7 @@ class CreateChatCompletionRequest(BaseModel):
     tool_choice: Optional[llama_cpp.ChatCompletionToolChoiceOption] = Field(
         default=None,
         description="A tool to apply to the generated completions.",
-    )  # TODO: verify
+    )
     max_tokens: Optional[int] = Field(
         default=None,
         description="The maximum number of tokens to generate. Defaults to inf",
