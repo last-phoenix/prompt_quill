@@ -75,10 +75,16 @@ class ChatCompletionResponseMessage(TypedDict):
     function_call: NotRequired[ChatCompletionResponseFunctionCall]  # DEPRECATED
 
 
+class ChatCompletionFunctionParameters(TypedDict):
+    type: Literal["object"]
+    properties: Dict[str, JsonType]
+    required: NotRequired[List[str]]
+
+
 class ChatCompletionFunction(TypedDict):
     name: str
     description: NotRequired[str]
-    parameters: Dict[str, JsonType]  # TODO: make this more specific
+    parameters: ChatCompletionFunctionParameters
 
 
 class ChatCompletionResponseChoice(TypedDict):
@@ -146,7 +152,7 @@ class CreateChatCompletionStreamResponse(TypedDict):
 class ChatCompletionFunctions(TypedDict):
     name: str
     description: NotRequired[str]
-    parameters: Dict[str, JsonType]  # TODO: make this more specific
+    parameters: ChatCompletionFunctionParameters
 
 
 class ChatCompletionFunctionCallOption(TypedDict):
@@ -246,8 +252,6 @@ class ChatCompletionRequestFunctionCallOption(TypedDict):
 ChatCompletionRequestFunctionCall = Union[
     Literal["none", "auto"], ChatCompletionRequestFunctionCallOption
 ]
-
-ChatCompletionFunctionParameters = Dict[str, JsonType]  # TODO: make this more specific
 
 
 class ChatCompletionToolFunction(TypedDict):
