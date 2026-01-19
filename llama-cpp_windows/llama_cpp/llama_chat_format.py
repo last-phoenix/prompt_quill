@@ -1883,9 +1883,8 @@ class Llava15ChatHandler:
         llama_types.CreateChatCompletionResponse,
         Iterator[llama_types.CreateChatCompletionStreamResponse],
     ]:
-        assert (
-            llama.context_params.logits_all is True
-        )  # BUG: logits_all=True is required for llava
+        if not llama.context_params.logits_all:
+            llama.context_params.logits_all = True
         assert self.clip_ctx is not None
         system_prompt = _get_system_message(messages)
         system_prompt = (
