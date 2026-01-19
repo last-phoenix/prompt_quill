@@ -2,6 +2,7 @@ import time
 import datetime
 import re
 import os
+import functools
 import numpy as np
 import globals
 import random
@@ -694,6 +695,11 @@ def get_negative_prompt():
 
 	return negative_out
 
+@functools.lru_cache(maxsize=32)
+def parse_filter_set(filter_text):
+	return set(word.strip().lower() for word in filter_text.split(','))
+
+
 def check_filtered(prompt):
 
 	not_check = False
@@ -701,7 +707,7 @@ def check_filtered(prompt):
 	if len(g.settings_data['sailing']['sail_filter_not_text']) > 0:
 		not_check = True
 		check_count = 0
-		search = set(word.strip().lower() for word in g.settings_data['sailing']['sail_filter_not_text'].split(','))
+		search = parse_filter_set(g.settings_data['sailing']['sail_filter_not_text'])
 		for word in search:
 			if word in prompt:
 				check_count += 1
@@ -710,7 +716,7 @@ def check_filtered(prompt):
 
 
 	if len(g.settings_data['sailing']['sail_filter_text']) > 0:
-		search = set(word.strip().lower() for word in g.settings_data['sailing']['sail_filter_text'].split(','))
+		search = parse_filter_set(g.settings_data['sailing']['sail_filter_text'])
 		check_count = 0
 		for word in search:
 			if word in prompt:
