@@ -3,8 +3,9 @@ import nltk
 # Sentence scoring (replace with your chosen criteria)
 def sentence_score(sentence):
     # Example: Score based on word count and POS tags (optional)
-    word_count = len(nltk.word_tokenize(sentence))
-    important_words = sum(1 for word, pos in nltk.pos_tag(nltk.word_tokenize(sentence))
+    tokenized_sentence = nltk.word_tokenize(sentence)
+    word_count = len(tokenized_sentence)
+    important_words = sum(1 for word, pos in nltk.pos_tag(tokenized_sentence)
                           if pos in ['NN', 'VB', 'JJ'])  # Nouns, verbs, adjectives (optional)
     return word_count + important_words  # Simple scoring example
 
