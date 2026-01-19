@@ -1019,6 +1019,99 @@ def functionary_chat_handler(
 ) -> Union[llama_types.ChatCompletion, Iterator[llama_types.ChatCompletionChunk]]:
     SYSTEM_MESSAGE = """A chat between a curious user and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the user's questions. The assistant calls functions with appropriate input when necessary"""
 
+    def _convert_completion_to_chat_function(
+        tool_name: str,
+        chunks: Iterator[llama_types.CreateCompletionStreamResponse],
+    ) -> Iterator[llama_types.CreateChatCompletionStreamResponse]:
+        first = True
+        id_ = None
+        created = None
+        model = None
+        for chunk in chunks:
+            if first:
+                id_ = "chat" + chunk["id"]
+                created = chunk["created"]
+                model = chunk["model"]
+                yield {
+                    "id": id_,
+                    "model": model,
+                    "created": created,
+                    "object": "chat.completion.chunk",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {
+                                "role": "assistant",
+                                "content": None,
+                                "function_call": {
+                                    "name": tool_name,
+                                    "arguments": "",
+                                },
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "id": tool_name,
+                                        "type": "function",
+                                        "function": {
+                                            "name": tool_name,
+                                            "arguments": "",
+                                        },
+                                    }
+                                ],
+                            },
+                            "finish_reason": None,
+                        }
+                    ],
+                }
+                first = False
+
+            yield {
+                "id": "chat" + chunk["id"],
+                "model": chunk["model"],
+                "created": chunk["created"],
+                "object": "chat.completion.chunk",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {
+                            "function_call": {
+                                "arguments": chunk["choices"][0]["text"],
+                            },
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "function": {
+                                        "arguments": chunk["choices"][0]["text"],
+                                    },
+                                }
+                            ],
+                        },
+                        "finish_reason": None,
+                    }
+                ],
+            }
+
+        if id_ is not None and created is not None and model is not None:
+            yield {
+                "id": id_,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "tool_calls",
+                        "logprobs": None,
+                        "delta": {
+                            "role": None,
+                            "content": None,
+                            "function_call": None,
+                            "tool_calls": None,
+                        },
+                    }
+                ],
+            }
+
     def generate_type_definition(
         param: Dict[str, llama_types.JsonType], indent_level: int, shared_defs
     ) -> str:
@@ -1281,10 +1374,10 @@ def functionary_chat_handler(
                 llama_grammar.JSON_GBNF, verbose=llama.verbose
             )
 
-    completion: llama_types.Completion = llama.create_completion(
+    completion_or_chunks = llama.create_completion(
         prompt=new_prompt,
         stop=["user:", "</s>"],
-        stream=False,
+        stream=stream,
         grammar=grammar,
         max_tokens=max_tokens,
         temperature=temperature,
@@ -1301,17 +1394,21 @@ def functionary_chat_handler(
         mirostat_eta=mirostat_eta,
         model=model,
         logits_processor=logits_processor,
-    )  # type: ignore
+    )
+
+    if stream:
+        chunks: Iterator[llama_types.CreateCompletionStreamResponse] = completion_or_chunks  # type: ignore
+        return _convert_completion_to_chat_function(function_call, chunks)
+
+    completion: llama_types.Completion = completion_or_chunks  # type: ignore
 
     assert "usage" in completion
     assert isinstance(function_call, str)
-    assert stream is False  # TODO: support stream mode
 
     if llama.verbose:
         print(new_prompt)
         print(completion["choices"][0]["text"])
 
-    # TODO: support stream mode
     return llama_types.CreateChatCompletionResponse(
         id="chat" + completion["id"],
         object="chat.completion",
