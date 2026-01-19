@@ -688,9 +688,15 @@ class _LlamaSamplingContext:
     prev: list[int] = field(default_factory=list)
     cur: list[llama_cpp.llama_token_data] = field(default_factory=list)
 
+    def __post_init__(self):
+        self.prev_c_len = len(self.prev)
+        self.prev_c_capacity = max(self.prev_c_len, 64)
+        self.prev_c = (llama_cpp.llama_token * self.prev_c_capacity)(*self.prev)
+
     def reset(self):
         self.prev = []
         self.cur = []
+        self.prev_c_len = 0
         if self.grammar is not None:
             self.grammar.reset()
 
@@ -744,11 +750,17 @@ class _LlamaSamplingContext:
             nl_token = ctx_main.model.token_nl()
             nl_logit = logits_array[nl_token]
             if self.params.penalty_last_n > 0:
+                penalty_last_n = min(len(self.prev), self.params.penalty_last_n)
+                offset = max(0, len(self.prev) - penalty_last_n)
+                p_last_tokens = ctypes.cast(
+                    ctypes.addressof(self.prev_c)
+                    + offset * ctypes.sizeof(llama_cpp.llama_token),
+                    llama_cpp.llama_token_p,
+                )
                 ctx_main.sample_repetition_penalties(
                     token_data_array,
-                    # TODO: Only create this once
-                    (llama_cpp.llama_token * len(self.prev))(*self.prev),  # type: ignore
-                    self.params.penalty_last_n,
+                    p_last_tokens,  # type: ignore
+                    penalty_last_n,
                     self.params.penalty_repeat,
                     self.params.penalty_freq,
                     self.params.penalty_present,
@@ -808,3 +820,16 @@ class _LlamaSamplingContext:
         if apply_grammar and self.grammar is not None:
             ctx_main.grammar_accept_token(self.grammar, id)
         self.prev.append(id)
+        # Update C array
+        if self.prev_c_len >= self.prev_c_capacity:
+            new_capacity = max(self.prev_c_capacity * 2, 64)
+            new_array = (llama_cpp.llama_token * new_capacity)()
+            ctypes.memmove(
+                new_array,
+                self.prev_c,
+                ctypes.sizeof(llama_cpp.llama_token) * self.prev_c_len,
+            )
+            self.prev_c = new_array
+            self.prev_c_capacity = new_capacity
+        self.prev_c[self.prev_c_len] = id
+        self.prev_c_len += 1
