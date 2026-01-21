@@ -78,5 +78,19 @@ def install_qdrant():
     else:
         print("Web UI already installed.")
 
+    # Note on Data:
+    # The original Windows installer downloads a large (~19GB) Qdrant snapshot with pre-indexed prompts.
+    # This Linux installer SKIPS that download to keep the setup lightweight and fast.
+    #
+    # If you want the full experience (search capabilities with 4.9M+ prompts), you can manually download
+    # the latest snapshot from Civitai: https://civitai.com/models/330412
+    # Look for "Data lli 3.0" or newer.
+    #
+    # To use it, download the zip, extract the snapshot file, and place it in the 'qdrant/snapshots' directory
+    # (you may need to create it) or configure Qdrant to load it.
+    print("\n[INFO] Skipping large data download (19GB).")
+    print("       To enable full search features, download the prompt database from:")
+    print("       https://civitai.com/models/330412")
+
 if __name__ == "__main__":
     install_qdrant()
