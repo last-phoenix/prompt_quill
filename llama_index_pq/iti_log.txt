@@ -1,0 +1,2 @@
+Ensured image_scores.db exists with updated schema
+Ensured image_scores.db exists with updated schema

@@ -1,0 +1,25 @@
+           _                 _
+  __ _  __| |_ __ __ _ _ __ | |_
+ / _` |/ _` | '__/ _` | '_ \| __|
+| (_| | (_| | | | (_| | | | | |_
+ \__, |\__,_|_|  \__,_|_| |_|\__|
+    |_|
+
+Version: 1.12.6, build: e545b696
+Access web UI at http://localhost:6333/dashboard
+
+2026-01-21T15:38:16.985504Z  WARN qdrant::settings: Config file not found: config/config
+2026-01-21T15:38:16.985534Z  WARN qdrant::settings: Config file not found: config/development
+2026-01-21T15:38:16.985565Z  INFO storage::content_manager::consensus::persistent: Loading raft state from ./storage/raft_state.json
+2026-01-21T15:38:16.989443Z  INFO qdrant: Distributed mode disabled
+2026-01-21T15:38:16.989479Z  INFO qdrant: Telemetry reporting disabled
+2026-01-21T15:38:16.989509Z  INFO qdrant: Inference service is not configured.
+2026-01-21T15:38:16.992064Z  WARN qdrant::actix::web_ui: Static content folder for Web UI './static' does not exist
+2026-01-21T15:38:16.992343Z  INFO qdrant::actix: TLS disabled for REST API
+2026-01-21T15:38:16.992398Z  INFO qdrant::actix: Qdrant HTTP listening on 6333
+2026-01-21T15:38:16.992409Z  INFO actix_server::builder: Starting 3 workers
+2026-01-21T15:38:16.992419Z  INFO actix_server::server: Actix runtime found; starting in Actix runtime
+2026-01-21T15:38:17.000359Z  INFO qdrant::tonic: Qdrant gRPC listening on 6334
+2026-01-21T15:38:17.000385Z  INFO qdrant::tonic: TLS disabled for gRPC API
+2026-01-21T15:38:17.444367Z  INFO actix_web::middleware::logger: 127.0.0.1 "GET /collections HTTP/1.1" 200 63 "-" "python-requests/2.32.5" 0.000678
+2026-01-21T15:38:33.108136Z  INFO actix_web::middleware::logger: 127.0.0.1 "GET /collections HTTP/1.1" 200 62 "-" "python-client/1.16.2 python/3.12.12" 0.000419

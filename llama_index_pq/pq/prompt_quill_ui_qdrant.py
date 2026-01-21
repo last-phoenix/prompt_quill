@@ -199,6 +199,7 @@ if __name__ == "__main__":
 		server_name = os.getenv("SERVER_NAME")
 
 	pq_ui.launch(favicon_path='logo/favicon32x32.ico',
-				 inbrowser=True,
+                 inbrowser=False,
 				 server_name=server_name,
-				 server_port=49152)  # share=True
+                 server_port=49152,
+                 share=True)

@@ -1,0 +1,21 @@
+Starting Qdrant...
+Qdrant started with PID 7958
+Waiting for Qdrant to initialize...
+wating for qdrant to get up and running
+wating for qdrant sucess it is up and running
+Starting Prompt Quill UI...
+/app/llama_index_pq/pq/shared.py:564: SyntaxWarning: invalid escape sequence '\['
+  'Token merging ratio: ', 'ADetailer .*?: ','"','\[', '\]', '\{', '\}']
+/app/llama_index_pq/pq/shared.py:564: SyntaxWarning: invalid escape sequence '\]'
+  'Token merging ratio: ', 'ADetailer .*?: ','"','\[', '\]', '\{', '\}']
+/app/llama_index_pq/pq/shared.py:564: SyntaxWarning: invalid escape sequence '\{'
+  'Token merging ratio: ', 'ADetailer .*?: ','"','\[', '\]', '\{', '\}']
+/app/llama_index_pq/pq/shared.py:564: SyntaxWarning: invalid escape sequence '\}'
+  'Token merging ratio: ', 'ADetailer .*?: ','"','\[', '\]', '\{', '\}']
+llama_cpp_hijack: loaded llama_cpp (GPU-enabled if wheel supports it)
+Traceback (most recent call last):
+  File "/app/llama_index_pq/pq/prompt_quill_ui_qdrant.py", line 51, in <module>
+    from generators.aesthetic import score
+  File "/app/llama_index_pq/pq/generators/aesthetic/score.py", line 19, in <module>
+    import clip
+ModuleNotFoundError: No module named 'clip'
