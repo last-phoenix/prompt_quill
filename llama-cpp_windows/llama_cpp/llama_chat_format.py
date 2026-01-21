@@ -481,118 +481,6 @@ def _get_system_message(
     return ""
 
 
-def _map_roles(
-    messages: List[llama_types.ChatCompletionRequestMessage],
-    role_map: Dict[str, str],
-) -> List[Tuple[str, Optional[str]]]:
-    """Map the message roles."""
-    output: List[Tuple[str, Optional[str]]] = []
-    for message in messages:
-        role = message["role"]
-        if role in role_map:
-            content: str | None = (
-                message["content"] if isinstance(message["content"], str) else None
-            )
-            output.append((role_map[role], content))
-    return output
-
-
-def _format_llama2(
-    system_message: str, messages: List[Tuple[str, Optional[str]]], sep: str, sep2: str
-) -> str:
-    """Format the prompt with the llama2 style."""
-    seps = [sep, sep2]
-    ret = system_message + sep
-    for i, (role, message) in enumerate(messages):
-        if system_message and i == 0:
-            m = message or ""
-            ret += m + seps[i % 2]
-        elif message:
-            ret += role + message + " " + seps[i % 2]
-        else:
-            ret += role + " "
-    return ret
-
-
-def _format_add_colon_single(
-    system_message: str, messages: List[Tuple[str, Optional[str]]], sep: str
-) -> str:
-    """Format the prompt with the add-colon-single style."""
-    ret = system_message + sep
-    for role, message in messages:
-        if message:
-            ret += role + ": " + message + sep
-        else:
-            ret += role + ":"
-    return ret
-
-
-def _format_add_colon_two(
-    system_message: str, messages: List[Tuple[str, Optional[str]]], sep: str, sep2: str
-) -> str:
-    """Format the prompt with the add-colon-two style."""
-    seps = [sep, sep2]
-    ret = system_message + seps[0]
-    for i, (role, message) in enumerate(messages):
-        if message:
-            ret += role + ": " + message + seps[i % 2]
-        else:
-            ret += role + ":"
-    return ret
-
-
-def _format_no_colon_single(
-    system_message: str, messages: List[Tuple[str, Optional[str]]], sep: str
-) -> str:
-    """Format the prompt with the no-colon-single style."""
-    ret = system_message
-    for role, message in messages:
-        if message:
-            ret += role + message + sep
-        else:
-            ret += role
-    return ret
-
-
-def _format_add_colon_space_single(
-    system_message: str, messages: List[Tuple[str, Optional[str]]], sep: str
-) -> str:
-    """Format the prompt with the add-colon-space-single style."""
-    ret = system_message + sep
-    for role, message in messages:
-        if message:
-            ret += role + ": " + message + sep
-        else:
-            ret += role + ": "  # must be end with a space
-    return ret
-
-
-def _format_chatml(
-    system_message: str, messages: List[Tuple[str, Optional[str]]], sep: str
-) -> str:
-    """Format the prompt with the chatml style."""
-    ret = "" if system_message == "" else system_message + sep + "\n"
-    for role, message in messages:
-        if message:
-            ret += role + "\n" + message + sep + "\n"
-        else:
-            ret += role + "\n"
-    return ret
-
-
-def _format_chatglm3(
-    system_message: str, messages: List[Tuple[str, Optional[str]]], sep: str
-) -> str:
-    """Format the prompt with the chatglm3 style."""
-    ret = ""
-    if system_message:
-        ret += system_message
-    for role, message in messages:
-        if message:
-            ret += role + "\n" + " " + message
-        else:
-            ret += role
-    return ret
 
 
 ### Chat Formats ###
@@ -616,14 +504,38 @@ def format_llama2(
     messages: List[llama_types.ChatCompletionRequestMessage],
     **kwargs: Any,
 ) -> ChatFormatterResponse:
-    _system_template = "<s>[INST] <<SYS>>\n{system_message}\n<</SYS>>"
-    _roles = dict(user="<s>[INST]", assistant="[/INST]")
-    _messages = _map_roles(messages, _roles)
-    system_message = _get_system_message(messages)
-    if system_message:
-        system_message = _system_template.format(system_message=system_message)
-    _prompt = _format_llama2(system_message, _messages, " ", "</s>") + "[/INST]"
-    return ChatFormatterResponse(prompt=_prompt)
+    template = (
+        "{%- set ns = namespace(found=false, content='') -%}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'system' and not ns.found -%}"
+                "{%- set ns.content = message['content'] -%}"
+                "{%- set ns.found = true -%}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{%- set system_message = ns.content -%}"
+        "{%- if system_message -%}"
+            "{{ '<s>[INST] <<SYS>>\\n' + system_message + '\\n<</SYS>> ' }}"
+        "{%- else -%}"
+            "{{ ' ' }}"
+        "{%- endif -%}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'user' -%}"
+                "{%- if loop.index0 == 0 and not system_message -%}"
+                     "{{ '<s>[INST]' + message['content'] + '  ' }}"
+                "{%- elif loop.index0 == 1 and system_message and messages[0]['role'] == 'system' -%}"
+                     "{{ message['content'] + ' ' }}"
+                "{%- else -%}"
+                     "{{ '<s>[INST]' + message['content'] + '  ' }}"
+                "{%- endif -%}"
+            "{%- elif message['role'] == 'assistant' -%}"
+                "{{ '[/INST]' + message['content'] + ' </s>' }}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ '[/INST]' }}"
+    )
+    return Jinja2ChatFormatter(template, eos_token="</s>", bos_token="<s>")(
+        messages=messages, **kwargs
+    )
 
 
 @register_chat_format("alpaca")
@@ -631,13 +543,26 @@ def format_alpaca(
     messages: List[llama_types.ChatCompletionRequestMessage],
     **kwargs: Any,
 ) -> ChatFormatterResponse:
-    _roles = dict(user="### Instruction", assistant="### Response")
-    _sep = "\n\n"
-    _sep2 = "</s>"
-    system_message = _get_system_message(messages)
-    _messages = _map_roles(messages, _roles)
-    _prompt = _format_add_colon_two(system_message, _messages, _sep, _sep2)
-    return ChatFormatterResponse(prompt=_prompt)
+    template = (
+        "{%- set ns = namespace(found=false, content='') -%}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'system' and not ns.found -%}"
+                "{%- set ns.content = message['content'] -%}"
+                "{%- set ns.found = true -%}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ ns.content + '\\n\\n' }}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'user' -%}"
+                "{{ '### Instruction: ' + message['content'] + '\\n\\n' }}"
+            "{%- elif message['role'] == 'assistant' -%}"
+                "{{ '### Response: ' + message['content'] + '</s>' }}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+    )
+    return Jinja2ChatFormatter(template, eos_token="</s>", bos_token="<s>")(
+        messages=messages, **kwargs
+    )
 
 
 @register_chat_format("qwen")
@@ -645,16 +570,20 @@ def format_qwen(
     messages: List[llama_types.ChatCompletionRequestMessage],
     **kwargs: Any,
 ) -> ChatFormatterResponse:
-    _roles = dict(user="<|im_start|>user", assistant="<|im_start|>assistant")
-    system_message = "You are a helpful assistant."
-    system_template = "<|im_start|>system\n{system_message}"
-    system_message = system_template.format(system_message=system_message)
-    _messages = _map_roles(messages, _roles)
-    _messages.append((_roles["assistant"], None))
-    _sep = "<|im_end|>"
-    _prompt = _format_chatml(system_message, _messages, _sep)
-    _sep2 = "<|endoftext|>"
-    return ChatFormatterResponse(prompt=_prompt, stop=_sep2)
+    template = (
+        "{{ '<|im_start|>system\\nYou are a helpful assistant.<|im_end|>\\n' }}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'user' -%}"
+                "{{ '<|im_start|>user\\n' + message['content'] + '<|im_end|>\\n' }}"
+            "{%- elif message['role'] == 'assistant' -%}"
+                "{{ '<|im_start|>assistant\\n' + message['content'] + '<|im_end|>\\n' }}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ '<|im_start|>assistant\\n' }}"
+    )
+    return Jinja2ChatFormatter(
+        template, eos_token="<|endoftext|>", bos_token="<|im_start|>"
+    )(messages=messages, **kwargs)
 
 
 @register_chat_format("vicuna")
@@ -662,15 +591,20 @@ def format(
     messages: List[llama_types.ChatCompletionRequestMessage],
     **kwargs: Any,
 ) -> ChatFormatterResponse:
-    _system_message = "A chat between a curious user and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the user's questions."
-    _roles = dict(user="USER", assistant="ASSISTANT")
-    _sep = " "
-    _sep2 = "</s>"
-    system_message = _system_message
-    _messages = _map_roles(messages, _roles)
-    _messages.append((_roles["assistant"], None))
-    _prompt = _format_add_colon_two(system_message, _messages, _sep, _sep2)
-    return ChatFormatterResponse(prompt=_prompt)
+    template = (
+        "{{ 'A chat between a curious user and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the user\\'s questions. ' }}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'user' -%}"
+                "{{ 'USER: ' + message['content'] + ' ' }}"
+            "{%- elif message['role'] == 'assistant' -%}"
+                "{{ 'ASSISTANT: ' + message['content'] + '</s>' }}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ 'ASSISTANT:' }}"
+    )
+    return Jinja2ChatFormatter(template, eos_token="</s>", bos_token="<s>")(
+        messages=messages, **kwargs
+    )
 
 
 @register_chat_format("oasst_llama")
@@ -678,15 +612,27 @@ def format_oasst_llama(
     messages: List[llama_types.ChatCompletionRequestMessage],
     **kwargs: Any,
 ) -> ChatFormatterResponse:
-    _system_template = "[INST] <<SYS>>\n{system_message}\n<</SYS>>\n\n"
-    _roles = dict(user="<|prompter|>", assistant="<|assistant|>")
-    _sep = "</s>"
-    system_message = _get_system_message(messages)
-    system_message = _system_template.format(system_message=system_message)
-    _messages = _map_roles(messages, _roles)
-    _messages.append((_roles["assistant"], None))
-    _prompt = _format_no_colon_single(system_message, _messages, _sep)
-    return ChatFormatterResponse(prompt=_prompt)
+    template = (
+        "{%- set ns = namespace(found=false, content='') -%}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'system' and not ns.found -%}"
+                "{%- set ns.content = message['content'] -%}"
+                "{%- set ns.found = true -%}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ '[INST] <<SYS>>\\n' + ns.content + '\\n<</SYS>>\\n\\n' }}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'user' -%}"
+                "{{ '<|prompter|>' + message['content'] + '</s>' }}"
+            "{%- elif message['role'] == 'assistant' -%}"
+                "{{ '<|assistant|>' + message['content'] + '</s>' }}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ '<|assistant|>' }}"
+    )
+    return Jinja2ChatFormatter(template, eos_token="</s>", bos_token="<s>")(
+        messages=messages, **kwargs
+    )
 
 
 @register_chat_format("baichuan-2")
@@ -694,15 +640,27 @@ def format_baichuan2(
     messages: List[llama_types.ChatCompletionRequestMessage],
     **kwargs: Any,
 ) -> ChatFormatterResponse:
-    _system_template = "{system_message}"
-    _roles = dict(user="<reserved_106>", assistant="<reserved_107>")
-    _sep = ""
-    system_message = _get_system_message(messages)
-    system_message = _system_template.format(system_message=system_message)
-    _messages = _map_roles(messages, _roles)
-    _messages.append((_roles["assistant"], None))
-    _prompt = _format_no_colon_single(system_message, _messages, _sep)
-    return ChatFormatterResponse(prompt=_prompt)
+    template = (
+        "{%- set ns = namespace(found=false, content='') -%}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'system' and not ns.found -%}"
+                "{%- set ns.content = message['content'] -%}"
+                "{%- set ns.found = true -%}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ ns.content }}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'user' -%}"
+                "{{ '<reserved_106>' + message['content'] }}"
+            "{%- elif message['role'] == 'assistant' -%}"
+                "{{ '<reserved_107>' + message['content'] }}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ '<reserved_107>' }}"
+    )
+    return Jinja2ChatFormatter(template, eos_token="", bos_token="<reserved_106>")(
+        messages=messages, **kwargs
+    )
 
 
 @register_chat_format("baichuan")
@@ -710,15 +668,27 @@ def format_baichuan(
     messages: List[llama_types.ChatCompletionRequestMessage],
     **kwargs: Any,
 ) -> ChatFormatterResponse:
-    _system_template = "{system_message}"
-    _roles = dict(user="<reserved_102>", assistant="<reserved_103>")
-    _sep = ""
-    system_message = _get_system_message(messages)
-    system_message = _system_template.format(system_message=system_message)
-    _messages = _map_roles(messages, _roles)
-    _messages.append((_roles["assistant"], None))
-    _prompt = _format_no_colon_single(system_message, _messages, _sep)
-    return ChatFormatterResponse(prompt=_prompt)
+    template = (
+        "{%- set ns = namespace(found=false, content='') -%}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'system' and not ns.found -%}"
+                "{%- set ns.content = message['content'] -%}"
+                "{%- set ns.found = true -%}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ ns.content }}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'user' -%}"
+                "{{ '<reserved_102>' + message['content'] }}"
+            "{%- elif message['role'] == 'assistant' -%}"
+                "{{ '<reserved_103>' + message['content'] }}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ '<reserved_103>' }}"
+    )
+    return Jinja2ChatFormatter(template, eos_token="", bos_token="<reserved_102>")(
+        messages=messages, **kwargs
+    )
 
 
 @register_chat_format("openbuddy")
@@ -726,21 +696,25 @@ def format_openbuddy(
     messages: List[llama_types.ChatCompletionRequestMessage],
     **kwargs: Any,
 ) -> ChatFormatterResponse:
-    _system_message = """You are a helpful, respectful and honest INTP-T AI Assistant named Buddy. You are talking to a human User.
-Always answer as helpfully and logically as possible, while being safe. Your answers should not include any harmful, political, religious, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.
-If a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information.
-You can speak fluently in many languages, for example: English, Chinese.
-You cannot access the internet, but you have vast knowledge, cutoff: 2021-09.
-You are trained by OpenBuddy team, (https://openbuddy.ai, https://github.com/OpenBuddy/OpenBuddy), you are based on LLaMA and Falcon transformers model, not related to GPT or OpenAI.
-
-"""
-    _roles = dict(user="User", assistant="Assistant")
-    _sep = "\n"
-    system_message = _system_message
-    _messages = _map_roles(messages, _roles)
-    _messages.append((_roles["assistant"], None))
-    _prompt = _format_add_colon_single(system_message, _messages, _sep)
-    return ChatFormatterResponse(prompt=_prompt)
+    template = (
+        "{{ 'You are a helpful, respectful and honest INTP-T AI Assistant named Buddy. You are talking to a human User.\\n' }}"
+        "{{ 'Always answer as helpfully and logically as possible, while being safe. Your answers should not include any harmful, political, religious, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\\n' }}"
+        "{{ 'If a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don\\'t know the answer to a question, please don\\'t share false information.\\n' }}"
+        "{{ 'You can speak fluently in many languages, for example: English, Chinese.\\n' }}"
+        "{{ 'You cannot access the internet, but you have vast knowledge, cutoff: 2021-09.\\n' }}"
+        "{{ 'You are trained by OpenBuddy team, (https://openbuddy.ai, https://github.com/OpenBuddy/OpenBuddy), you are based on LLaMA and Falcon transformers model, not related to GPT or OpenAI.\\n\\n\\n' }}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'user' -%}"
+                "{{ 'User: ' + message['content'] + '\\n' }}"
+            "{%- elif message['role'] == 'assistant' -%}"
+                "{{ 'Assistant: ' + message['content'] + '\\n' }}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ 'Assistant:' }}"
+    )
+    return Jinja2ChatFormatter(template, eos_token="", bos_token="User")(
+        messages=messages, **kwargs
+    )
 
 
 @register_chat_format("redpajama-incite")
@@ -748,15 +722,27 @@ def format_redpajama_incite(
     messages: List[llama_types.ChatCompletionRequestMessage],
     **kwargs: Any,
 ) -> ChatFormatterResponse:
-    _system_message = _get_system_message(messages)
-    _roles = dict(user="<human>", assistant="<bot>")
-    _sep = "\n"
-    _stop = "<human>"
-    system_message = _system_message
-    _messages = _map_roles(messages, _roles)
-    _messages.append((_roles["assistant"], None))
-    _prompt = _format_add_colon_single(system_message, _messages, _sep)
-    return ChatFormatterResponse(prompt=_prompt, stop=_stop)
+    template = (
+        "{%- set ns = namespace(found=false, content='') -%}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'system' and not ns.found -%}"
+                "{%- set ns.content = message['content'] -%}"
+                "{%- set ns.found = true -%}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ ns.content + '\\n' }}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'user' -%}"
+                "{{ '<human>: ' + message['content'] + '\\n' }}"
+            "{%- elif message['role'] == 'assistant' -%}"
+                "{{ '<bot>: ' + message['content'] + '\\n' }}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ '<bot>:' }}"
+    )
+    return Jinja2ChatFormatter(template, eos_token="<human>", bos_token="<human>")(
+        messages=messages, **kwargs
+    )
 
 
 @register_chat_format("snoozy")
@@ -764,21 +750,30 @@ def format_snoozy(
     messages: List[llama_types.ChatCompletionRequestMessage],
     **kwargs: Any,
 ) -> ChatFormatterResponse:
-    system_template = "### Instruction:\n{system_message}"
-    default_system_message = "The prompt below is a question to answer, a task to complete, or a conversation to respond to; decide which and write an appropriate response."
-    _system_message = _get_system_message(messages)
-    _system_message = (
-        _system_message if _system_message != "" else default_system_message
+    template = (
+        "{%- set ns = namespace(found=false, content='') -%}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'system' and not ns.found -%}"
+                "{%- set ns.content = message['content'] -%}"
+                "{%- set ns.found = true -%}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{%- if not ns.content -%}"
+            "{%- set ns.content = 'The prompt below is a question to answer, a task to complete, or a conversation to respond to; decide which and write an appropriate response.' -%}"
+        "{%- endif -%}"
+        "{{ '### Instruction:\\n' + ns.content + '\\n' }}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'user' -%}"
+                "{{ '### Prompt: ' + message['content'] + '\\n' }}"
+            "{%- elif message['role'] == 'assistant' -%}"
+                "{{ '### Response: ' + message['content'] + '\\n' }}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ '### Response:' }}"
     )
-    system_message = system_template.format(system_message=_system_message)
-    _roles = dict(user="### Prompt", assistant="### Response")
-    _sep = "\n"
-    _stop = "###"
-    system_message = _system_message
-    _messages = _map_roles(messages, _roles)
-    _messages.append((_roles["assistant"], None))
-    _prompt = _format_add_colon_single(system_message, _messages, _sep)
-    return ChatFormatterResponse(prompt=_prompt, stop=_stop)
+    return Jinja2ChatFormatter(template, eos_token="###", bos_token="### Instruction")(
+        messages=messages, **kwargs
+    )
 
 
 @register_chat_format("phind")
@@ -786,13 +781,20 @@ def format_phind(
     messages: List[llama_types.ChatCompletionRequestMessage],
     **kwargs: Any,
 ) -> ChatFormatterResponse:
-    _roles = dict(user="### User Message", assistant="### Assistant")
-    _sep = "\n\n"
-    _system_message = "### System Prompt\nYou are an intelligent programming assistant."
-    _messages = _map_roles(messages, _roles)
-    _messages.append((_roles["assistant"], None))
-    _prompt = _format_add_colon_single(_system_message, _messages, _sep)
-    return ChatFormatterResponse(prompt=_prompt)
+    template = (
+        "{{ '### System Prompt\\nYou are an intelligent programming assistant.\\n\\n' }}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'user' -%}"
+                "{{ '### User Message: ' + message['content'] + '\\n\\n' }}"
+            "{%- elif message['role'] == 'assistant' -%}"
+                "{{ '### Assistant: ' + message['content'] + '\\n\\n' }}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ '### Assistant:' }}"
+    )
+    return Jinja2ChatFormatter(
+        template, eos_token="", bos_token="### System Prompt"
+    )(messages=messages, **kwargs)
 
 
 @register_chat_format("intel")
@@ -800,13 +802,27 @@ def format_intel(
     messages: List[llama_types.ChatCompletionRequestMessage],
     **kwargs: Any,
 ) -> ChatFormatterResponse:
-    _roles = dict(user="### User:", assistant="### Assistant:")
-    _sep = "\n"
-    _system_message = "### System:\n{system_message}"
-    _messages = _map_roles(messages, _roles)
-    _messages.append((_roles["assistant"], None))
-    _prompt = _format_add_colon_single(_system_message, _messages, _sep)
-    return ChatFormatterResponse(prompt=_prompt)
+    template = (
+        "{%- set ns = namespace(found=false, content='') -%}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'system' and not ns.found -%}"
+                "{%- set ns.content = message['content'] -%}"
+                "{%- set ns.found = true -%}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ '### System:\\n' + ns.content + '\\n' }}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'user' -%}"
+                "{{ '### User:: ' + message['content'] + '\\n' }}"
+            "{%- elif message['role'] == 'assistant' -%}"
+                "{{ '### Assistant:: ' + message['content'] + '\\n' }}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ '### Assistant::' }}"
+    )
+    return Jinja2ChatFormatter(template, eos_token="", bos_token="### System:")(
+        messages=messages, **kwargs
+    )
 
 
 @register_chat_format("open-orca")
@@ -814,26 +830,20 @@ def format_open_orca(
     messages: List[llama_types.ChatCompletionRequestMessage],
     **kwargs: Any,
 ) -> ChatFormatterResponse:
-    system_template = "{system_message}"
-    system_message = (
-        "You are a helpful assistant. Please answer truthfully and write out your "
-        "thinking step by step to be sure you get the right answer. If you make a mistake or encounter "
-        "an error in your thinking, say so out loud and attempt to correct it. If you don't know or "
-        "aren't sure about something, say so clearly. You will act as a professional logician, mathematician, "
-        "and physicist. You will also act as the most appropriate type of expert to answer any particular "
-        "question or solve the relevant problem; state which expert type your are, if so. Also think of "
-        "any particular named expert that would be ideal to answer the relevant question or solve the "
-        "relevant problem; name and act as them, if appropriate."
+    template = (
+        "{{ 'You are a helpful assistant. Please answer truthfully and write out your thinking step by step to be sure you get the right answer. If you make a mistake or encounter an error in your thinking, say so out loud and attempt to correct it. If you don\\'t know or aren\\'t sure about something, say so clearly. You will act as a professional logician, mathematician, and physicist. You will also act as the most appropriate type of expert to answer any particular question or solve the relevant problem; state which expert type your are, if so. Also think of any particular named expert that would be ideal to answer the relevant question or solve the relevant problem; name and act as them, if appropriate.<|end_of_turn|>\\n' }}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'user' -%}"
+                "{{ 'User: ' + message['content'] + '<|end_of_turn|>\\n' }}"
+            "{%- elif message['role'] == 'assistant' -%}"
+                "{{ 'Assistant: ' + message['content'] + '<|end_of_turn|>\\n' }}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ 'Assistant: ' }}"
     )
-    roles = ("User", "Assistant")
-    sep = "<|end_of_turn|>\n"
-    # stop_token_ids=[32000, 32001],  # "<|end_of_turn|>"
-    stop_str = "User"
-    system_message = system_template.format(system_message=system_message)
-    _messages = _map_roles(messages, dict(zip(roles, roles)))
-    _messages.append((roles[1], None))
-    _prompt = _format_add_colon_space_single(system_message, _messages, sep)
-    return ChatFormatterResponse(prompt=_prompt, stop=stop_str)
+    return Jinja2ChatFormatter(template, eos_token="User", bos_token="User")(
+        messages=messages, **kwargs
+    )
 
 
 @register_chat_format("mistrallite")
@@ -841,15 +851,27 @@ def format_mistrallite(
     messages: List[llama_types.ChatCompletionRequestMessage],
     **kwargs: Any,
 ) -> ChatFormatterResponse:
-    _roles = dict(user="<|prompter|>", assistant="</s>\n<|assistant|>")
-    _sep = " "
-    system_template = """<|system|>{system_message}</s>"""
-    system_message = _get_system_message(messages)
-    system_message = system_template.format(system_message=system_message)
-    _messages = _map_roles(messages, _roles)
-    _messages.append((_roles["assistant"], None))
-    _prompt = _format_no_colon_single(system_message, _messages, _sep)
-    return ChatFormatterResponse(prompt=_prompt)
+    template = (
+        "{%- set ns = namespace(found=false, content='') -%}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'system' and not ns.found -%}"
+                "{%- set ns.content = message['content'] -%}"
+                "{%- set ns.found = true -%}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ '<|system|>' + ns.content + '</s>' }}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'user' -%}"
+                "{{ '<|prompter|>' + message['content'] + ' ' }}"
+            "{%- elif message['role'] == 'assistant' -%}"
+                "{{ '</s>\\n<|assistant|>' + message['content'] + ' ' }}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ '</s>\\n<|assistant|>' }}"
+    )
+    return Jinja2ChatFormatter(template, eos_token="</s>", bos_token="<|prompter|>")(
+        messages=messages, **kwargs
+    )
 
 
 @register_chat_format("zephyr")
@@ -857,16 +879,27 @@ def format_zephyr(
     messages: List[llama_types.ChatCompletionRequestMessage],
     **kwargs: Any,
 ) -> ChatFormatterResponse:
-    system_template = """<|system|>
-{system_message}"""
-    system_message = _get_system_message(messages)
-    system_message = system_template.format(system_message=system_message)
-    _roles = dict(user="<|user|>\n", assistant="<|assistant|>\n")
-    _sep = "</s>"
-    _messages = _map_roles(messages, _roles)
-    _messages.append((_roles["assistant"], None))
-    _prompt = _format_chatml(system_message, _messages, _sep)
-    return ChatFormatterResponse(prompt=_prompt, stop=_sep)
+    template = (
+        "{%- set ns = namespace(found=false, content='') -%}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'system' and not ns.found -%}"
+                "{%- set ns.content = message['content'] -%}"
+                "{%- set ns.found = true -%}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ '<|system|>\\n' + ns.content + '</s>\\n' }}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'user' -%}"
+                "{{ '<|user|>\\n\\n' + message['content'] + '</s>\\n' }}"
+            "{%- elif message['role'] == 'assistant' -%}"
+                "{{ '<|assistant|>\\n\\n' + message['content'] + '</s>\\n' }}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ '<|assistant|>\\n\\n' }}"
+    )
+    return Jinja2ChatFormatter(template, eos_token="</s>", bos_token="<|user|>")(
+        messages=messages, **kwargs
+    )
 
 
 @register_chat_format("pygmalion")
@@ -874,15 +907,27 @@ def format_pygmalion(
     messages: List[llama_types.ChatCompletionRequestMessage],
     **kwargs: Any,
 ) -> ChatFormatterResponse:
-    system_template = """<|system|>{system_message}"""
-    system_message = _get_system_message(messages)
-    system_message = system_template.format(system_message=system_message)
-    _roles = dict(user="<|user|>", assistant="<|model|>")
-    _sep = "\n"
-    _messages = _map_roles(messages, _roles)
-    _messages.append((_roles["assistant"], None))
-    _prompt = _format_chatml(system_message, _messages, _sep)
-    return ChatFormatterResponse(prompt=_prompt, stop=_sep)
+    template = (
+        "{%- set ns = namespace(found=false, content='') -%}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'system' and not ns.found -%}"
+                "{%- set ns.content = message['content'] -%}"
+                "{%- set ns.found = true -%}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ '<|system|>' + ns.content + '\\n\\n' }}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'user' -%}"
+                "{{ '<|user|>\\n' + message['content'] + '\\n\\n' }}"
+            "{%- elif message['role'] == 'assistant' -%}"
+                "{{ '<|model|>\\n' + message['content'] + '\\n\\n' }}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ '<|model|>\\n' }}"
+    )
+    return Jinja2ChatFormatter(template, eos_token="\n", bos_token="<|user|>")(
+        messages=messages, **kwargs
+    )
 
 
 @register_chat_format("chatml")
@@ -890,16 +935,9 @@ def format_chatml(
     messages: List[llama_types.ChatCompletionRequestMessage],
     **kwargs: Any,
 ) -> ChatFormatterResponse:
-    system_template = """<|im_start|>system
-{system_message}"""
-    system_message = _get_system_message(messages)
-    system_message = system_template.format(system_message=system_message)
-    _roles = dict(user="<|im_start|>user", assistant="<|im_start|>assistant")
-    _sep = "<|im_end|>"
-    _messages = _map_roles(messages, _roles)
-    _messages.append((_roles["assistant"], None))
-    _prompt = _format_chatml(system_message, _messages, _sep)
-    return ChatFormatterResponse(prompt=_prompt, stop=_sep)
+    return Jinja2ChatFormatter(
+        CHATML_CHAT_TEMPLATE, eos_token="<|im_end|>", bos_token="<|im_start|>"
+    )(messages=messages, **kwargs)
 
 
 @register_chat_format("mistral-instruct")
@@ -907,25 +945,20 @@ def format_mistral_instruct(
     messages: List[llama_types.ChatCompletionRequestMessage],
     **kwargs: Any,
 ) -> ChatFormatterResponse:
-    bos = "<s>"
-    eos = "</s>"
-    stop = eos
-    prompt = bos
-    for message in messages:
-        if (
-            message["role"] == "user"
-            and message["content"] is not None
-            and isinstance(message["content"], str)
-        ):
-            prompt += "[INST] " + message["content"]
-        elif (
-            message["role"] == "assistant"
-            and message["content"] is not None
-            and isinstance(message["content"], str)
-        ):
-            prompt += " [/INST]" + message["content"] + eos
-    prompt += " [/INST]"
-    return ChatFormatterResponse(prompt=prompt, stop=stop)
+    template = (
+        "{{ '<s>' }}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'user' -%}"
+                "{{ '[INST] ' + message['content'] }}"
+            "{%- elif message['role'] == 'assistant' -%}"
+                "{{ ' [/INST]' + message['content'] + '</s>' }}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ ' [/INST]' }}"
+    )
+    return Jinja2ChatFormatter(template, eos_token="</s>", bos_token="<s>")(
+        messages=messages, **kwargs
+    )
 
 
 @register_chat_format("chatglm3")
@@ -933,16 +966,27 @@ def format_chatglm3(
     messages: List[llama_types.ChatCompletionRequestMessage],
     **kwargs: Any,
 ) -> ChatFormatterResponse:
-    system_template = """<|system|>
-{system_message}"""
-    system_message = _get_system_message(messages)
-    system_message = system_template.format(system_message=system_message)
-    _roles = dict(user="<|user|>", assistant="<|assistant|>")
-    _sep = "</s>"
-    _messages = _map_roles(messages, _roles)
-    _messages.append((_roles["assistant"], None))
-    _prompt = _format_chatglm3(system_message, _messages, _sep)
-    return ChatFormatterResponse(prompt=_prompt, stop=_sep)
+    template = (
+        "{%- set ns = namespace(found=false, content='') -%}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'system' and not ns.found -%}"
+                "{%- set ns.content = message['content'] -%}"
+                "{%- set ns.found = true -%}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ '<|system|>\\n' + ns.content }}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'user' -%}"
+                "{{ '<|user|>\\n ' + message['content'] }}"
+            "{%- elif message['role'] == 'assistant' -%}"
+                "{{ '<|assistant|>\\n ' + message['content'] }}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ '<|assistant|>' }}"
+    )
+    return Jinja2ChatFormatter(template, eos_token="</s>", bos_token="<|user|>")(
+        messages=messages, **kwargs
+    )
 
 
 @register_chat_format("openchat")
@@ -950,17 +994,27 @@ def format_openchat(
     messages: List[llama_types.ChatCompletionRequestMessage],
     **kwargs: Any,
 ) -> ChatFormatterResponse:
-    system_template = "{system_message}<|end_of_turn|>"
-    system_message = _get_system_message(messages)
-    system_message = system_template.format(system_message=system_message)
-    _roles = dict(
-        user="GPT4 Correct User: ", assistant="<|end_of_turn|>GPT4 Correct Assistant: "
+    template = (
+        "{%- set ns = namespace(found=false, content='') -%}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'system' and not ns.found -%}"
+                "{%- set ns.content = message['content'] -%}"
+                "{%- set ns.found = true -%}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ ns.content + '<|end_of_turn|><|end_of_turn|>\\n' }}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'user' -%}"
+                "{{ 'GPT4 Correct User: \\n' + message['content'] + '<|end_of_turn|>\\n' }}"
+            "{%- elif message['role'] == 'assistant' -%}"
+                "{{ '<|end_of_turn|>GPT4 Correct Assistant: \\n' + message['content'] + '<|end_of_turn|>\\n' }}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ '<|end_of_turn|>GPT4 Correct Assistant: \\n' }}"
     )
-    _sep = "<|end_of_turn|>"
-    _messages = _map_roles(messages, _roles)
-    _messages.append((_roles["assistant"], None))
-    _prompt = _format_chatml(system_message, _messages, _sep)
-    return ChatFormatterResponse(prompt=_prompt, stop=_sep)
+    return Jinja2ChatFormatter(
+        template, eos_token="<|end_of_turn|>", bos_token="GPT4 Correct User: "
+    )(messages=messages, **kwargs)
 
 
 # Chat format for Saiga models, see more details and available models:
@@ -970,19 +1024,21 @@ def format_saiga(
     messages: list[llama_types.ChatCompletionRequestMessage],
     **kwargs: Any,
 ) -> ChatFormatterResponse:
-    _message_template = "<s>{role}\n{content}</s>"
-    _roles = dict(user="user", bot="bot", system="system")
-    _messages = _map_roles(messages, _roles)
-
-    _prompt = ""
-    for role, content in _messages:
-        if content:
-            _prompt += _message_template.format(role=role, content=content)
-        else:
-            _prompt += f"<s>{role}\n"
-    # Response template
-    _prompt += "<s>bot"
-    return ChatFormatterResponse(prompt=_prompt.strip())
+    template = (
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'user' -%}"
+                "{{ '<s>user\\n' + message['content'] + '</s>' }}"
+            "{%- elif message['role'] == 'assistant' -%}"
+                "{{ '<s>bot\\n' + message['content'] + '</s>' }}"
+            "{%- elif message['role'] == 'system' -%}"
+                "{{ '<s>system\\n' + message['content'] + '</s>' }}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{{ '<s>bot' }}"
+    )
+    return Jinja2ChatFormatter(template, eos_token="</s>", bos_token="<s>user")(
+        messages=messages, **kwargs
+    )
 
 
 # Tricky chat formats that require custom chat handlers
