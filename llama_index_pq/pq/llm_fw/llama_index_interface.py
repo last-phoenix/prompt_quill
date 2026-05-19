@@ -418,9 +418,6 @@ Given the context information and not prior knowledge,\n""" + self.g.settings_da
         )
         output = completion_chunks['choices'][0]['text']
 
-        gc.collect()
-        torch.cuda.empty_cache()
-
         if '</think>' in output:
             output = re.sub(r".*?</think>", "", output, flags=re.DOTALL)
 
@@ -467,8 +464,6 @@ Given the context information and not prior knowledge,\n""" + self.g.settings_da
         try:
             self.reset_model()
             answer = self.retrieve_llm_completion(query)
-            gc.collect()
-            torch.cuda.empty_cache()
             return answer
 
         except Exception as e:
@@ -480,8 +475,6 @@ Given the context information and not prior knowledge,\n""" + self.g.settings_da
         self.set_rephrase_pipeline(context)
         self.reset_model()
         response =  self.query_rephrase_engine.query(query)
-        gc.collect()
-        torch.cuda.empty_cache()
         response = response.response.strip(" ")
         return response.replace('"','')
 
