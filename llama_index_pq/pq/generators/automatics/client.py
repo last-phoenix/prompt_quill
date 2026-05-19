@@ -173,14 +173,10 @@ class automa_client:
         if len(LayerDiffuse) > 0:
             alwayson_scripts["layerdiffuse"] = LayerDiffuse
 
-        if type(prompt) == str:
-            prompt = (str(prompt).encode('utf-8')).decode('utf-8')
-        elif type(prompt) == bytes:
+        if isinstance(prompt, bytes):
             prompt = prompt.decode('utf-8')
 
-        if type(negative_prompt) == str:
-            negative_prompt = (str(negative_prompt).encode('utf-8')).decode('utf-8')
-        elif type(negative_prompt) == bytes:
+        if isinstance(negative_prompt, bytes):
             negative_prompt = negative_prompt.decode('utf-8')
 
         override_settings= {}
