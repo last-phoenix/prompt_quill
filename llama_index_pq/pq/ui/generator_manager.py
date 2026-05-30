@@ -57,16 +57,31 @@ class GeneratorManager:
         self.g.settings_data['automa']['automa_height'] = automa_width
         return automa_height, automa_width
 
-    def automa_refresh(self):
+    def refresh_automa_data(self):
         model_scores = self.get_model_scores()
-        models = self.automa_client.get_checkpoints(self.g.settings_data['automa']['automa_url'])
+        url = self.g.settings_data['automa']['automa_url']
+        models = self.automa_client.get_checkpoints(url)
         self.g.settings_data['automa']['automa_checkpoints'] = [
             f"{model} (Score: {model_scores.get(model, 'N/A')})" if model in model_scores else model
             for model in models
         ]
-        self.g.settings_data['automa']['automa_samplers'] = self.automa_client.get_samplers(self.g.settings_data['automa']['automa_url'])
-        self.g.settings_data['automa']['automa_schedulers'] = self.automa_client.get_schedulers(self.g.settings_data['automa']['automa_url'])
-        self.g.settings_data['automa']['automa_vaes'] = self.automa_client.get_vaes(self.g.settings_data['automa']['automa_url'])
+        self.g.settings_data['automa']['automa_samplers'] = self.automa_client.get_samplers(url)
+        self.g.settings_data['automa']['automa_schedulers'] = self.automa_client.get_schedulers(url)
+        self.g.settings_data['automa']['automa_vaes'] = self.automa_client.get_vaes(url)
+        self.g.settings_data['automa']['automa_loras'] = self.automa_client.get_loras(url)
+        self.g.settings_data['automa']['automa_embeddings'] = self.automa_client.get_embeddings(url)
+        self.settings_io.write_settings(self.g.settings_data)
+
+    def refresh_automa_data_from_ui(self, url):
+        self.g.settings_data['automa']['automa_url'] = url
+        try:
+            self.refresh_automa_data()
+            return "A1111 / Forge data refreshed and saved"
+        except Exception as e:
+            return f"Error refreshing data: {str(e)}"
+
+    def automa_refresh(self):
+        self.refresh_automa_data()
         return (
             gr.update(choices=self.g.settings_data['automa']['automa_samplers'], value=self.g.settings_data['automa']['automa_sampler']),
             gr.update(choices=self.g.settings_data['automa']['automa_checkpoints'], value=self.g.settings_data['automa']['automa_checkpoint']),
@@ -93,18 +108,7 @@ class GeneratorManager:
         return model_scores
 
     def iti_automa_refresh(self):
-        model_scores = self.get_model_scores()
-        models = self.automa_client.get_checkpoints(self.g.settings_data['automa']['automa_url'])
-        self.g.settings_data['automa']['automa_checkpoints'] = [
-            f"{model} (Score: {model_scores.get(model, 'N/A')})" if model in model_scores else model
-            for model in models
-        ]
-        self.g.settings_data['automa']['automa_samplers'] = self.automa_client.get_samplers(self.g.settings_data['automa']['automa_url'])
-        self.g.settings_data['automa']['automa_schedulers'] = self.automa_client.get_schedulers(self.g.settings_data['automa']['automa_url'])
-        self.g.settings_data['automa']['automa_vaes'] = self.automa_client.get_vaes(self.g.settings_data['automa']['automa_url'])
-        self.g.settings_data['automa']['automa_loras'] = self.automa_client.get_loras(self.g.settings_data['automa']['automa_url'])
-        self.g.settings_data['automa']['automa_embeddings'] = self.automa_client.get_embeddings(self.g.settings_data['automa']['automa_url'])
-
+        self.refresh_automa_data()
         return (
             gr.update(choices=self.g.settings_data['automa']['automa_samplers'], value=self.g.settings_data["iti"]['sailing']['sail_sampler']),
             gr.update(choices=self.g.settings_data['automa']['automa_checkpoints'], value=self.g.settings_data["iti"]['sailing']['sail_checkpoint']),

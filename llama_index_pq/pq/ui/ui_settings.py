@@ -208,10 +208,30 @@ def settings_prompting_settings(ui_code):
             )
     return components
 
-def setup_settings_tab(ui_code):
+def settings_automa_settings(generator_manager):
+    components = {}
+    with gr.Tab("A1111 / Forge") as automa_settings:
+        with gr.Row():
+            with gr.Column(scale=3):
+                components['automa_url'] = gr.TextArea(
+                    lines=1, label="API URL", value=g.settings_data['automa']['automa_url']
+                )
+            with gr.Column(scale=1):
+                components['automa_status'] = create_textbox("Status", "", "Status")
+                components['automa_refresh_button'] = create_button("Save and Refresh")
+
+        components['automa_refresh_button'].click(
+            fn=generator_manager.refresh_automa_data_from_ui,
+            inputs=components['automa_url'],
+            outputs=components['automa_status']
+        )
+    return components
+
+def setup_settings_tab(ui_code, generator_manager):
     components = {}
     components.update(settings_presets(ui_code))
     components.update(settings_model_settings(ui_code))
     components.update(settings_prompting_settings(ui_code))
     components.update(settings_advanced_model_settings(ui_code))
+    components.update(settings_automa_settings(generator_manager))
     return components

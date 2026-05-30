@@ -37,9 +37,6 @@ from settings.io import settings_io
 
 g = globals.get_globals()
 g.settings_data = settings_io().load_settings()
-g.settings_data['automa']['automa_checkpoints'] = []  # bad hack for now, this should later be updateable via a button
-g.settings_data['automa']['automa_samplers'] = []
-
 
 
 from ui.ui_share import UiShare
@@ -161,7 +158,7 @@ with gr.Blocks(css=css, title='Prompt Quill') as pq_ui:
 	with gr.Tab("Image Scoring"):
 		image_scoring_components = setup_image_scoring_tab(image_score)
 	with gr.Tab("Settings"):
-		settings_components = setup_settings_tab(settings_manager)  # Use settings_manager
+		settings_components = setup_settings_tab(settings_manager, generator_manager)  # Use settings_manager
 
 	extensions = load_extensions()
 	tab_map = {
