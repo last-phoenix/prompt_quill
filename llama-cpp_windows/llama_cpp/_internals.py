@@ -306,9 +306,34 @@ class _LlamaContext:
         c_state_data = (ctypes.c_uint8 * len(state_data)).from_buffer_copy(state_data)
         llama_cpp.llama_set_state_data(self.ctx, c_state_data)
 
-    # TODO: llama_load_session_file
+    def load_session_file(self, path_session: str) -> List[int]:
+        assert self.ctx is not None
+        n_token_capacity = self.n_ctx()
+        tokens_out = (llama_cpp.llama_token * n_token_capacity)()
+        n_token_count_out = ctypes.c_size_t(0)
+        success = llama_cpp.llama_load_session_file(
+            self.ctx,
+            path_session.encode("utf-8"),
+            tokens_out,
+            n_token_capacity,
+            ctypes.byref(n_token_count_out),
+        )
+        if not success:
+            raise RuntimeError(f"Failed to load session file: {path_session}")
+        return list(tokens_out[: n_token_count_out.value])
 
-    # TODO: llama_save_session_file
+    def save_session_file(self, path_session: str, tokens: Sequence[int]):
+        assert self.ctx is not None
+        n_token_count = len(tokens)
+        c_tokens = (llama_cpp.llama_token * n_token_count)(*tokens)
+        success = llama_cpp.llama_save_session_file(
+            self.ctx,
+            path_session.encode("utf-8"),
+            c_tokens,
+            n_token_count,
+        )
+        if not success:
+            raise RuntimeError(f"Failed to save session file: {path_session}")
 
     def decode(self, batch: "_LlamaBatch"):
         assert self.ctx is not None
