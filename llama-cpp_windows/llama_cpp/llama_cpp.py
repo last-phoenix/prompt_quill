@@ -1445,7 +1445,7 @@ def llama_load_session_file(
     tokens_out,  # type: Array[llama_token]
     n_token_capacity: Union[c_size_t, int],
     n_token_count_out,  # type: _Pointer[c_size_t]
-) -> int:
+) -> bool:
     return _lib.llama_load_session_file(
         ctx, path_session, tokens_out, n_token_capacity, n_token_count_out
     )
@@ -1458,7 +1458,7 @@ _lib.llama_load_session_file.argtypes = [
     c_size_t,
     c_size_t_p,
 ]
-_lib.llama_load_session_file.restype = c_size_t
+_lib.llama_load_session_file.restype = c_bool
 
 
 # LLAMA_API bool llama_save_session_file(
@@ -1471,7 +1471,7 @@ def llama_save_session_file(
     path_session: bytes,
     tokens,  # type: Array[llama_token]
     n_token_count: Union[c_size_t, int],
-) -> int:
+) -> bool:
     return _lib.llama_save_session_file(ctx, path_session, tokens, n_token_count)
 
 
@@ -1481,7 +1481,7 @@ _lib.llama_save_session_file.argtypes = [
     llama_token_p,
     c_size_t,
 ]
-_lib.llama_save_session_file.restype = c_size_t
+_lib.llama_save_session_file.restype = c_bool
 
 # //
 # // Decoding
