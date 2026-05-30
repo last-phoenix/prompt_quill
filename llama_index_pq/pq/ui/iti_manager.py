@@ -254,6 +254,7 @@ class ITIManager:
                     image_path TEXT,
                     basename TEXT,
                     model TEXT,
+                    lora_combo TEXT,
                     pos_embedding TEXT,
                     neg_embedding TEXT,
                     pos_lora TEXT,
@@ -274,6 +275,12 @@ class ITIManager:
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_basename ON image_scores(basename)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_topic ON image_scores(topic)")
+            conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_upsert ON image_scores(
+                    model, lora_combo, pos_lora, neg_lora, pos_embedding, neg_embedding,
+                    sampler, scheduler, vae, prompt, topic
+                )
+            """)
             conn.commit()
         self.log_step("Ensured image_scores.db exists with updated schema")
 
@@ -281,10 +288,10 @@ class ITIManager:
         if not files:
             return "No files dropped."
         deleted = []
-        for file in files:
-            filename = file.name  # Full path from dropped file
-            base_name = os.path.basename(filename)  # Just the filename
-            with sqlite3.connect("image_scores.db") as db:
+        with sqlite3.connect("image_scores.db") as db:
+            for file in files:
+                filename = file.name  # Full path from dropped file
+                base_name = os.path.basename(filename)  # Just the filename
                 cursor = db.execute("SELECT filename FROM image_scores WHERE filename LIKE ?", (f"%{base_name}",))
                 row = cursor.fetchone()
                 if row:
@@ -293,15 +300,24 @@ class ITIManager:
                     db.commit()
                     if os.path.exists(db_path):
                         os.remove(db_path)
-                        deleted.append(f"Deleted {base_name} from DB and filesystem"), []
+                        deleted.append(f"Deleted {base_name} from DB and filesystem")
                     else:
-                        deleted.append(f"Deleted {base_name} from DB; file not found"), []
+                        deleted.append(f"Deleted {base_name} from DB; file not found")
                 else:
-                    if os.path.exists(db_path):
-                        os.remove(db_path)
-                        deleted.append(f"Deleted {base_name} from filesystem not found in DB"), []
+                    # In some contexts db_path might not be defined if row is None
+                    # But the original code had a bug where it tried to use db_path even if row was None?
+                    # Let's check original code.
+                    # if os.path.exists(db_path): os.remove(db_path)
+                    # wait, db_path is only defined in the if row: block.
+                    # Original code had: else: if os.path.exists(db_path): os.remove(db_path)
+                    # This would raise UnboundLocalError if row is None and it wasn't defined before.
+                    # I will fix this potential bug while I'm at it.
+                    # The intention probably was to delete the file if it exists even if not in DB.
+                    if os.path.exists(filename):
+                        os.remove(filename)
+                        deleted.append(f"Deleted {base_name} from filesystem not found in DB")
                     else:
-                        deleted.append(f"{base_name} not found in DB nor Filesystem"), []
+                        deleted.append(f"{base_name} not found in DB nor Filesystem")
         return "\n".join(deleted)
 
     def down_score_files(self, files):
@@ -377,57 +393,59 @@ class ITIManager:
         status_message = "learned from {image_counter} images how the models perform"
         image_counter = 0
         self.g.settings_data["automa"]["automa_seed"] = 1282321159
-        for i, (prompt, topic) in enumerate(prompts):
-            self.log_step(f"Prompt {i+1}: '{prompt}' (Topic: {topic})")
 
-            for combo in combos:
-                model, pos_lora, neg_lora, pos_embedding, neg_embedding, sampler, scheduler, vae = combo
-                settings = self.g.settings_data.copy()
-                settings["automa"]["automa_checkpoint"] = model
+        with sqlite3.connect("image_scores.db") as db:
+            for i, (prompt, topic) in enumerate(prompts):
+                self.log_step(f"Prompt {i+1}: '{prompt}' (Topic: {topic})")
 
-
-                if pos_lora != 'None':
-                    settings["iti"]["prompt"]["pos_lora"] = f"<lora:{pos_lora}:0.8>"
-                else:
-                    settings["iti"]["prompt"]["pos_lora"] = ""
-
-                if neg_lora != 'None':
-                    settings["iti"]["prompt"]["neg_lora"] = f"<lora:{neg_lora}:0.8>"
-                else:
-                    settings["iti"]["prompt"]["neg_lora"] = ""
-                if pos_embedding != 'None':
-                    settings["iti"]["prompt"]["pos_style"] = pos_embedding
-                else:
-                    settings["iti"]["prompt"]["pos_style"] = ""
-                if neg_embedding != 'None':
-                    settings["iti"]["prompt"]["neg_style"] = neg_embedding
-                else:
-                    settings["iti"]["prompt"]["neg_style"] = ""
-
-                settings["automa"]["sampler"] = sampler
-                settings["automa"]["scheduler"] = scheduler
-                settings["automa"]["vae"] = vae
+                for combo in combos:
+                    model, pos_lora, neg_lora, pos_embedding, neg_embedding, sampler, scheduler, vae = combo
+                    settings = self.g.settings_data.copy()
+                    settings["automa"]["automa_checkpoint"] = model
 
 
-                if not self.g.job_running:
-                    return
-                image_counter += 1
-                for log, running, good in self.process_and_score_image(
-                        None, prompt, None, 0, i, "learning", input_folder
-                ):
-                    score = self.actual_score["total"]
-                    with sqlite3.connect("image_scores.db") as db:
+                    if pos_lora != 'None':
+                        settings["iti"]["prompt"]["pos_lora"] = f"<lora:{pos_lora}:0.8>"
+                    else:
+                        settings["iti"]["prompt"]["pos_lora"] = ""
+
+                    if neg_lora != 'None':
+                        settings["iti"]["prompt"]["neg_lora"] = f"<lora:{neg_lora}:0.8>"
+                    else:
+                        settings["iti"]["prompt"]["neg_lora"] = ""
+                    if pos_embedding != 'None':
+                        settings["iti"]["prompt"]["pos_style"] = pos_embedding
+                    else:
+                        settings["iti"]["prompt"]["pos_style"] = ""
+                    if neg_embedding != 'None':
+                        settings["iti"]["prompt"]["neg_style"] = neg_embedding
+                    else:
+                        settings["iti"]["prompt"]["neg_style"] = ""
+
+                    settings["automa"]["sampler"] = sampler
+                    settings["automa"]["scheduler"] = scheduler
+                    settings["automa"]["vae"] = vae
+
+
+                    if not self.g.job_running:
+                        return
+                    image_counter += 1
+                    for log, running, good in self.process_and_score_image(
+                            None, prompt, None, 0, i, "learning", input_folder
+                    ):
+                        score = self.actual_score["total"]
+                        lora_combo = f"{pos_lora}+{neg_lora}"
                         db.execute("""
-                                INSERT INTO image_scores (image_path, model, lora_combo, pos_lora, neg_lora, pos_embedding, neg_embedding, sampler, scheduler, vae, score, prompt, iteration, topic, filename, scores_json, penalties_json)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                INSERT INTO image_scores (image_path, basename, model, lora_combo, pos_lora, neg_lora, pos_embedding, neg_embedding, sampler, scheduler, vae, score, prompt, iteration, topic, filename, scores_json, penalties_json)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                 ON CONFLICT(model, lora_combo, pos_lora, neg_lora, pos_embedding, neg_embedding, sampler, scheduler, vae, prompt, topic)
                                 DO UPDATE SET score = excluded.score, iteration = excluded.iteration
                                 WHERE excluded.score > image_scores.score
-                            """, (None, model, pos_lora, pos_lora, neg_lora, pos_embedding, neg_embedding, sampler, scheduler, vae, score, prompt, 0, topic, self.last_file, json.dumps(self.actual_score['scores']), json.dumps(self.actual_score['penalties'])))
+                            """, (None, os.path.basename(self.last_file) if self.last_file else None, model, lora_combo, pos_lora, neg_lora, pos_embedding, neg_embedding, sampler, scheduler, vae, score, prompt, 0, topic, self.last_file, json.dumps(self.actual_score['scores']), json.dumps(self.actual_score['penalties'])))
                         db.commit()
-                    self.log_step(f"Combo {combo} scored {score} (kept if highest)")
-                    self.last_file = None
-                    yield log, running, good, status_message.format(image_counter=image_counter)
+                        self.log_step(f"Combo {combo} scored {score} (kept if highest)")
+                        self.last_file = None
+                        yield log, running, good, status_message.format(image_counter=image_counter)
 
         self.log_step(f"Learning complete—{total_images} images evaluated")
 
@@ -741,10 +759,11 @@ class ITIManager:
         combos_run = 0
         combo_scores = {}
 
-        while combos_run < subset_size: #len(all_combos):
-            if not self.g.job_running:
-                return
-            with sqlite3.connect("image_scores.db") as db:
+        with sqlite3.connect("image_scores.db") as db:
+            while combos_run < subset_size: #len(all_combos):
+                if not self.g.job_running:
+                    return
+
                 cursor = db.cursor()
                 cursor.execute("""
                     SELECT MAX(avg_score) 
@@ -770,65 +789,64 @@ class ITIManager:
                 """, (topic_key, min_trials))
                 combo_stats = cursor.fetchall()
 
-            top_threshold = top_score * flop_factor
-            self.log_step(f"Top score: {top_score:.1f}, Flop threshold: {top_threshold:.1f}")
+                top_threshold = top_score * flop_factor
+                self.log_step(f"Top score: {top_score:.1f}, Flop threshold: {top_threshold:.1f}")
 
-            good_combos = {(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]) for r in combo_stats if r[8] >= top_threshold}
-            flop_combos = {(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]) for r in combo_stats if r[8] < top_threshold}
+                good_combos = {(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]) for r in combo_stats if r[8] >= top_threshold}
+                flop_combos = {(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]) for r in combo_stats if r[8] < top_threshold}
 
-            learned_combos = self.get_learned_combos(topic_key)
-            unexplored_combos = [c for c in all_combos if c not in good_combos and c not in flop_combos]
-            random.shuffle(unexplored_combos)
+                learned_combos = self.get_learned_combos(topic_key)
+                unexplored_combos = [c for c in all_combos if c not in good_combos and c not in flop_combos]
+                random.shuffle(unexplored_combos)
 
-            # Dynamic split: more planned early, more learned later
-            explored_ratio = combos_run / len(all_combos)
-            learned_count = min(int(subset_size * explored_ratio), subset_size - 2)  # At least 2 planned
-            planned_count = subset_size - learned_count
-            subset = learned_combos[:learned_count] + unexplored_combos[:planned_count]
+                # Dynamic split: more planned early, more learned later
+                explored_ratio = combos_run / len(all_combos)
+                learned_count = min(int(subset_size * explored_ratio), subset_size - 2)  # At least 2 planned
+                planned_count = subset_size - learned_count
+                subset = learned_combos[:learned_count] + unexplored_combos[:planned_count]
 
-            if not subset:
-                self.log_step("No more combos to explore!")
-                break
+                if not subset:
+                    self.log_step("No more combos to explore!")
+                    break
 
-            self.log_step(f"Running subset of {len(subset)} combos (learned: {learned_count}, planned: {planned_count})")
-            for i, combo in enumerate(subset):
-                if combo in flop_combos:
-                    self.log_step(f"Skipping known flop: {combo}")
-                    continue
+                self.log_step(f"Running subset of {len(subset)} combos (learned: {learned_count}, planned: {planned_count})")
+                for i, combo in enumerate(subset):
+                    if combo in flop_combos:
+                        self.log_step(f"Skipping known flop: {combo}")
+                        continue
 
-                model, pos_lora, neg_lora, pos_embedding, neg_embedding, sampler, scheduler, vae = combo
-                combo_scores.setdefault(combo, [])
+                    model, pos_lora, neg_lora, pos_embedding, neg_embedding, sampler, scheduler, vae = combo
+                    combo_scores.setdefault(combo, [])
 
-                settings["automa"]["automa_checkpoint"] = model
-                settings["iti"]["prompt"]["pos_lora"] = (
-                    f'{base_pos_lora},<lora:{pos_lora}:0.8>' if pos_lora and pos_lora != "None" else base_pos_lora
-                )
-                settings["iti"]["prompt"]["neg_lora"] = (
-                    f'<lora:{neg_lora}:0.8>' if neg_lora and neg_lora != "None" else ""
-                )
+                    settings["automa"]["automa_checkpoint"] = model
+                    settings["iti"]["prompt"]["pos_lora"] = (
+                        f'{base_pos_lora},<lora:{pos_lora}:0.8>' if pos_lora and pos_lora != "None" else base_pos_lora
+                    )
+                    settings["iti"]["prompt"]["neg_lora"] = (
+                        f'<lora:{neg_lora}:0.8>' if neg_lora and neg_lora != "None" else ""
+                    )
 
-                if self.g.settings_data['iti']['enhance_prompt']:
-                    best_prompt = self.prompt_enhancer.enhance_prompt(best_prompt)
+                    if self.g.settings_data['iti']['enhance_prompt']:
+                        best_prompt = self.prompt_enhancer.enhance_prompt(best_prompt)
 
-                for log, running, good in self.process_and_score_image(
-                        image_path, best_prompt, effective_target, i, 0, "regular", input_folder
-                ):
-                    result = self.actual_score
-                    score = result["total"]
-                    combo_scores[combo].append(score)
-                    combos_run += 1
+                    for log, running, good in self.process_and_score_image(
+                            image_path, best_prompt, effective_target, i, 0, "regular", input_folder
+                    ):
+                        result = self.actual_score
+                        score = result["total"]
+                        combo_scores[combo].append(score)
+                        combos_run += 1
 
 
-                    with sqlite3.connect("image_scores.db") as db:
-                        cursor = db.cursor()
+                        lora_combo = f"{pos_lora}+{neg_lora}"
                         cursor.execute("""
                             INSERT INTO image_scores (
-                                image_path, basename, model, pos_embedding, neg_embedding, 
+                                image_path, basename, model, lora_combo, pos_embedding, neg_embedding,
                                 pos_lora, neg_lora, sampler, scheduler, vae, score, prompt, 
                                 iteration, topic, filename, mode, scores_json, penalties_json
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (
-                            self.last_file, os.path.basename(self.last_file), model,
+                            self.last_file, os.path.basename(self.last_file), model, lora_combo,
                             pos_embedding, neg_embedding, pos_lora, neg_lora, sampler, scheduler, vae,
                             score, best_prompt, i, topic_key, self.last_file, "single",
                             json.dumps(self.actual_score['scores']), json.dumps(self.actual_score['penalties'])
