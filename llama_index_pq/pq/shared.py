@@ -11,6 +11,18 @@ from typing import Dict, Union, Optional, Tuple, List
 
 g = globals.get_globals()
 
+# Compiled regex patterns for performance
+RE_WILDCARD = re.compile(r"(\d*)x?__([\w-]+)__")
+RE_WILDCARD_SIMPLE = re.compile(r"(\d*)x?__([^_]+)__")
+RE_MULTI_WILDCARD = re.compile(r"\{(\d+)\$\$__([\w-]+)__(:[\d\.]+)?\}")
+RE_WEIGHTED_WILDCARD = re.compile(r"__([\w-]+)__:([\d\.]+)")
+RE_CHOICE = re.compile(r"\{([^}]+)\}")
+RE_CHOICE_NO_DOLLAR = re.compile(r"\{([^}\$]+)\}")
+RE_WHITESPACE = re.compile(r"\s+")
+RE_NEWLINE_EXTRACT = re.compile(r'.*\n')
+RE_LLM_SPECIAL = re.compile(r"<\|(.*?)\|>")
+RE_TAGS = re.compile(r"<(.*?)>")
+
 
 class PromptProcessor:
 	def __init__(self):
@@ -239,7 +251,6 @@ class WildcardResolver:
 				parts = parts[1:]
 
 		options = []
-		wildcard_pattern = r"(\d*)x?__([^_]+)__"
 		for part in parts:
 			part = part.strip()
 			# Parse weight (e.g., "red:0.7")
@@ -258,21 +269,14 @@ class WildcardResolver:
 
 			if opt.startswith('"') and opt.endswith('"'):
 				opt = opt[1:-1]
-				if re.match(wildcard_pattern, opt):
-					match = re.findall(wildcard_pattern, opt)[0]
-					count = int(match[0]) if match[0] else 1
-					wildcard = match[1]
-					options.extend([(item, weight) for item in self.load_wildcard_file(wildcard, count)])
-				else:
-					options.append((opt, weight))
+
+			match = RE_WILDCARD_SIMPLE.match(opt)
+			if match:
+				count = int(match.group(1)) if match.group(1) else 1
+				wildcard = match.group(2)
+				options.extend([(item, weight) for item in self.load_wildcard_file(wildcard, count)])
 			else:
-				if re.match(wildcard_pattern, opt):
-					match = re.findall(wildcard_pattern, opt)[0]
-					count = int(match[0]) if match[0] else 1
-					wildcard = match[1]
-					options.extend([(item, weight) for item in self.load_wildcard_file(wildcard, count)])
-				else:
-					options.append((opt, weight))
+				options.append((opt, weight))
 
 		if is_iter:
 			return [("iter", repeat_count, options)]
@@ -312,11 +316,6 @@ class WildcardResolver:
 			depth: int = 0,  # Track recursion depth
 			active_wildcards: Optional[set] = None  # Track active wildcards for cycle detection
 	) -> Union[str, List[str]]:
-		wildcard_pattern = r"(\d*)x?__([\w-]+)__"
-		multi_wildcard_pattern = r"\{(\d+)\$\$__([\w-]+)__(:[\d\.]+)?\}"
-		weighted_wildcard_pattern = r"__([\w-]+)__:([\d\.]+)"
-		choice_pattern = r"\{([^}]+)\}"  # New pattern for {option a|option b|...}
-
 		# Stop if max depth is reached
 		if depth >= max_depth:
 			return prompt if max_combinations is None else [prompt]
@@ -327,12 +326,12 @@ class WildcardResolver:
 		if active_wildcards is None:
 			active_wildcards = set()
 
-		wildcards = re.findall(wildcard_pattern, prompt)
-		multi_wildcards = re.findall(multi_wildcard_pattern, prompt)
-		weighted_wildcards = re.findall(weighted_wildcard_pattern, prompt)
+		wildcards = RE_WILDCARD.findall(prompt)
+		multi_wildcards = RE_MULTI_WILDCARD.findall(prompt)
+		weighted_wildcards = RE_WEIGHTED_WILDCARD.findall(prompt)
 		inline_matches = self.find_inline_matches(prompt)
 		inline_options = [self.parse_inline_options(match) for match in inline_matches]
-		choice_matches = re.findall(choice_pattern, prompt)  # Find new choice patterns
+		choice_matches = RE_CHOICE.findall(prompt)  # Find new choice patterns
 
 		if not wildcards and not multi_wildcards and not weighted_wildcards and not inline_matches and not choice_matches:
 			return prompt if max_combinations is None else [prompt]
@@ -364,10 +363,10 @@ class WildcardResolver:
 				replacement = separator.join(options)
 
 			if recursive and (
-					re.search(wildcard_pattern, replacement) or
-					re.search(multi_wildcard_pattern, replacement) or
-					re.search(weighted_wildcard_pattern, replacement) or
-					re.search(choice_pattern, replacement)  # Check for new pattern too
+					RE_WILDCARD.search(replacement) or
+					RE_MULTI_WILDCARD.search(replacement) or
+					RE_WEIGHTED_WILDCARD.search(replacement) or
+					RE_CHOICE.search(replacement)  # Check for new pattern too
 			):
 				replacement = self.resolve_prompt(
 					replacement,
@@ -391,7 +390,7 @@ class WildcardResolver:
 			resolved = prompt
 
 			# Choice pattern first
-			choice_matches = re.findall(r"\{([^}\$]+)\}", resolved)
+			choice_matches = RE_CHOICE_NO_DOLLAR.findall(resolved)
 			for match in choice_matches:
 				print(f"  Processing choice: {{{match}}}")
 				options = [opt.strip() for opt in match.split("|")]
@@ -399,10 +398,10 @@ class WildcardResolver:
 					replacement = random.choice(options)
 					print(f"    Chose: {replacement}")
 					if recursive and (
-							re.search(r"(\d*)x?__([\w-]+)__", replacement) or
-							re.search(r"\{(\d+)\$\$__([\w-]+)__(:[\d\.]+)?\}", replacement) or
-							re.search(r"__([\w-]+)__:([\d\.]+)", replacement) or
-							re.search(r"\{([^}\$]+)\}", replacement)
+							RE_WILDCARD.search(replacement) or
+							RE_MULTI_WILDCARD.search(replacement) or
+							RE_WEIGHTED_WILDCARD.search(replacement) or
+							RE_CHOICE_NO_DOLLAR.search(replacement)
 					):
 						replacement = self.resolve_prompt(
 							replacement, None, recursive, self.separator, self.max_depth, self.max_retries, self.resolved_values, depth + 1, self.active_wildcards
@@ -453,10 +452,10 @@ class WildcardResolver:
 					replacement = random.choice(options)  # Pick one randomly
 					# Recursively resolve if the replacement contains wildcards
 					if recursive and (
-							re.search(wildcard_pattern, replacement) or
-							re.search(multi_wildcard_pattern, replacement) or
-							re.search(weighted_wildcard_pattern, replacement) or
-							re.search(choice_pattern, replacement)
+							RE_WILDCARD.search(replacement) or
+							RE_MULTI_WILDCARD.search(replacement) or
+							RE_WEIGHTED_WILDCARD.search(replacement) or
+							RE_CHOICE.search(replacement)
 					):
 						replacement = self.resolve_prompt(
 							replacement,
@@ -481,10 +480,10 @@ class WildcardResolver:
 			for attempt in range(max_retries):
 				resolved = attempt_resolution(prompt, attempt, depth)
 				best_resolved = resolved
-				if not (re.search(wildcard_pattern, resolved) or
-						re.search(multi_wildcard_pattern, resolved) or
-						re.search(weighted_wildcard_pattern, resolved) or
-						re.search(choice_pattern, resolved)):  # Check new pattern too
+				if not (RE_WILDCARD.search(resolved) or
+						RE_MULTI_WILDCARD.search(resolved) or
+						RE_WEIGHTED_WILDCARD.search(resolved) or
+						RE_CHOICE.search(resolved)):  # Check new pattern too
 					break
 
 			for match, opts in zip(inline_matches, inline_options):
@@ -497,7 +496,7 @@ class WildcardResolver:
 					current_idx = self.iter_state[state_key] % total_items
 					opt_idx = current_idx // repeat_count
 					replacement = iter_opts[opt_idx][0]
-					if recursive and re.search(r"[\[\]]|(\d*)x?__[\w-]+__|\{(\d+)\$\$__[\w-]+__\}", best_resolved):
+					if recursive and (re.search(r"[\[\]]", best_resolved) or RE_WILDCARD.search(best_resolved) or RE_MULTI_WILDCARD.search(best_resolved)):
 						replacement = self.resolve_prompt(
 							replacement,
 							None,
@@ -512,7 +511,7 @@ class WildcardResolver:
 					self.iter_state[state_key] += 1  # Increment the iterator state
 				else:
 					replacement = opts[0][0]
-					if recursive and re.search(r"[\[\]]|(\d*)x?__[\w-]+__|\{(\d+)\$\$__[\w-]+__\}", best_resolved):
+					if recursive and (re.search(r"[\[\]]", best_resolved) or RE_WILDCARD.search(best_resolved) or RE_MULTI_WILDCARD.search(best_resolved)):
 						replacement = self.resolve_prompt(
 							replacement,
 							None,
@@ -556,21 +555,19 @@ def clean_llm_artefacts(prompt):
 	if prompt == '':
 		prompt = unfixed
 
-	prompt = re.sub(r"\s+", " ", prompt)
+	prompt = RE_WHITESPACE.sub(" ", prompt)
 	if '\n' in prompt:
-		prompt = re.sub(r'.*\n', '', prompt)
+		prompt = RE_NEWLINE_EXTRACT.sub('', prompt)
 
 	artefacts = ['Answer: ','Steps: ','scale: ', 'Seed: ', 'Face restoration: ', 'Size: ', 'Model hash: ', 'Model: ', 'Clip skip: ',
-				 'Token merging ratio: ', 'ADetailer .*?: ','"','\[', '\]', '\{', '\}']
+				 'Token merging ratio: ', r'ADetailer .*?: ', '"', r'\[', r'\]', r'\{', r'\}']
 
 	for artefact in artefacts:
 		if artefact in prompt:
 			prompt = re.sub(rf'.*{artefact}', '', prompt)
 
-	pattern = r"<\|(.*?)\|>"
-	prompt = re.sub(pattern, "", prompt)
-	pattern = r"<(.*?)>"
-	prompt = re.sub(pattern, "", prompt)
+	prompt = RE_LLM_SPECIAL.sub("", prompt)
+	prompt = RE_TAGS.sub("", prompt)
 
 	return prompt
 
@@ -748,6 +745,10 @@ def is_image_black(image):
 	# Check if all values in the array are 0 (black)
 	return np.all(image_array == 0)
 
+# List of invalid characters for Windows
+RE_INVALID_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1F]')
+RE_NON_ASCII = re.compile(r'[^\x00-\x7F]+')
+
 def sanitize_path_component(component, replacement='_'):
 	"""
 	Sanitizes a string to make it a valid file path component.
@@ -759,11 +760,8 @@ def sanitize_path_component(component, replacement='_'):
 	Returns:
 	- str: The sanitized string.
 	"""
-	# List of invalid characters for Windows
-	invalid_chars = r'[<>:"/\\|?*\x00-\x1F]'
-
 	# Replace invalid characters with the specified replacement
-	sanitized = re.sub(invalid_chars, replacement, component)
+	sanitized = RE_INVALID_CHARS.sub(replacement, component)
 
 	# Trim leading and trailing spaces
 	sanitized = sanitized.strip()
@@ -771,7 +769,7 @@ def sanitize_path_component(component, replacement='_'):
 	return sanitized
 
 def to_utf8_string(text):
-	cleaned_text = re.sub(r'[^\x00-\x7F]+', '?', text)
+	cleaned_text = RE_NON_ASCII.sub('?', text)
 	try:
 		return cleaned_text.encode('utf-8').decode('utf-8')
 	except UnicodeDecodeError:
