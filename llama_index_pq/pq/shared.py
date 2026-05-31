@@ -706,23 +706,19 @@ def check_filtered(prompt):
 	check = False
 	if len(g.settings_data['sailing']['sail_filter_not_text']) > 0:
 		not_check = True
-		check_count = 0
 		search = parse_filter_set(g.settings_data['sailing']['sail_filter_not_text'])
 		for word in search:
 			if word in prompt:
-				check_count += 1
-		if check_count == len(search):
-			not_check = False
+				not_check = False
+				break
 
 
 	if len(g.settings_data['sailing']['sail_filter_text']) > 0:
 		search = parse_filter_set(g.settings_data['sailing']['sail_filter_text'])
-		check_count = 0
 		for word in search:
 			if word in prompt:
-				check_count += 1
-		if check_count == len(search):
-			check = True
+				check = True
+				break
 
 
 	return not_check + check
