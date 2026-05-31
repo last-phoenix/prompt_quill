@@ -476,7 +476,11 @@ class SailingManager:
                     new_nodes = self.interface.direct_search(self.g.settings_data['sailing']['sail_text'], self.g.settings_data['sailing']['sail_depth'], n)
                     query = self.get_next_target_new(new_nodes)
                 print('some error happened: ', str(e))
-                time.sleep(5)
+                yield self.sail_log, list(images) if self.g.settings_data['sailing']['sail_generate'] else [], f"Error occurred: {str(e)}. Retrying in 5 seconds..."
+                for _ in range(10):
+                    if not self.g.job_running:
+                        break
+                    time.sleep(0.5)
             finally:
                 if not self.g.job_running:
                     yield self.sail_log, list(images) if self.g.settings_data['sailing']['sail_generate'] else [], "Journey interrupted"
