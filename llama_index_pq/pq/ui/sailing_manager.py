@@ -177,11 +177,12 @@ class SailingManager:
                 while True:
                     if not self.g.job_running:
                         break
-                    prompt = self.interface.retrieve_llm_completion(query, sail_keep_text=sail_keep_text)
                     filtered = shared.check_filtered(query)
-                    if not filtered and prompt not in self.g.sail_history:
-                        self.g.sail_history.append(prompt)
-                        break
+                    if not filtered:
+                        prompt = self.interface.retrieve_llm_completion(query, sail_keep_text=sail_keep_text)
+                        if prompt not in self.g.sail_history:
+                            self.g.sail_history.append(prompt)
+                            break
                     n += 1
 
                     sail_depth = self.g.settings_data['sailing']['sail_depth']
