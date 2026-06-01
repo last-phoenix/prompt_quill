@@ -69,11 +69,11 @@ class NotificationThread(BackgroundThread):
 
     def handle(self) -> None:
         try:
-            task = TASKS_QUEUE.get(block=False)
+            task = TASKS_QUEUE.get(timeout=1)
             # send_notification(task)
             logging.info(f'Notification for {task} was sent.')
         except queue.Empty:
-            time.sleep(1)
+            pass
 
 
 class BackgroundThreadFactory:
