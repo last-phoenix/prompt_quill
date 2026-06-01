@@ -280,49 +280,73 @@ class ITIManager:
     def delete_files(self, files):
         if not files:
             return "No files dropped."
+
         deleted = []
-        for file in files:
-            filename = file.name  # Full path from dropped file
-            base_name = os.path.basename(filename)  # Just the filename
-            with sqlite3.connect("image_scores.db") as db:
-                cursor = db.execute("SELECT filename FROM image_scores WHERE filename LIKE ?", (f"%{base_name}",))
+        to_delete_db = []
+        to_delete_fs = []
+
+        with sqlite3.connect("image_scores.db") as db:
+            cursor = db.cursor()
+            for file in files:
+                filename = file.name if hasattr(file, "name") else file
+                base_name = os.path.basename(filename)
+                cursor.execute("SELECT filename FROM image_scores WHERE filename LIKE ?", (f"%{base_name}",))
                 row = cursor.fetchone()
                 if row:
                     db_path = row[0]
-                    db.execute("DELETE FROM image_scores WHERE filename = ?", (db_path,))
-                    db.commit()
+                    to_delete_db.append(db_path)
                     if os.path.exists(db_path):
-                        os.remove(db_path)
-                        deleted.append(f"Deleted {base_name} from DB and filesystem"), []
+                        to_delete_fs.append(db_path)
+                        deleted.append(f"Deleted {base_name} from DB and filesystem")
                     else:
-                        deleted.append(f"Deleted {base_name} from DB; file not found"), []
+                        deleted.append(f"Deleted {base_name} from DB; file not found")
                 else:
-                    if os.path.exists(db_path):
-                        os.remove(db_path)
-                        deleted.append(f"Deleted {base_name} from filesystem not found in DB"), []
+                    if os.path.exists(filename):
+                        to_delete_fs.append(filename)
+                        deleted.append(f"Deleted {base_name} from filesystem not found in DB")
                     else:
-                        deleted.append(f"{base_name} not found in DB nor Filesystem"), []
-        return "\n".join(deleted)
+                        deleted.append(f"{base_name} not found in DB nor Filesystem")
+
+            if to_delete_db:
+                placeholders = ','.join(['?'] * len(to_delete_db))
+                db.execute(f"DELETE FROM image_scores WHERE filename IN ({placeholders})", to_delete_db)
+                db.commit()
+
+            for path in to_delete_fs:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+        return "\n".join(deleted), []
 
     def down_score_files(self, files):
-        conn = sqlite3.connect("image_scores.db")  # Adjust DB path
-        cursor = conn.cursor()
-        updated = 0
-        for file in files:
-            filename = os.path.basename(file.name if hasattr(file, "name") else file)
-            cursor.execute("SELECT filename FROM image_scores WHERE filename LIKE ?", (f"%{filename}",))
-            row = cursor.fetchone()
+        if not files:
+            return "No files dropped.", []
 
-            cursor.execute(
-                "UPDATE image_scores SET score = 1 WHERE filename LIKE ?",
-                (f"%{filename}",)
-            )
-            if cursor.rowcount > 0:  # Check if any rows were affected
-                updated += cursor.rowcount
-                if os.path.exists(row[0]):
-                    os.remove(row[0])
-            conn.commit()
-        conn.close()
+        updated = 0
+        to_delete = []
+        with sqlite3.connect("image_scores.db") as conn:
+            cursor = conn.cursor()
+            for file in files:
+                filename = os.path.basename(file.name if hasattr(file, "name") else file)
+                cursor.execute("SELECT filename FROM image_scores WHERE filename LIKE ?", (f"%{filename}",))
+                rows = cursor.fetchall()
+                for row in rows:
+                    to_delete.append(row[0])
+
+            if to_delete:
+                # Batch update scores to 1
+                placeholders = ','.join(['?'] * len(to_delete))
+                cursor.execute(f"UPDATE image_scores SET score = 1 WHERE filename IN ({placeholders})", to_delete)
+                updated = cursor.rowcount
+                conn.commit()
+
+                # Physical deletion of files
+                for path in to_delete:
+                    if os.path.exists(path):
+                        os.remove(path)
+
         return f"Updated {updated} image(s) to score 10!", []
 
     def update_file_list(self):
