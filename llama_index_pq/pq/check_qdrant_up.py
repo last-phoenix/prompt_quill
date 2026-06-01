@@ -21,7 +21,7 @@ trycount = 0
 while 1:
     print('wating for qdrant to get up and running')
     # The API endpoint
-    url = "http://localhost:6333/dashboard"
+    url = "http://localhost:6333/collections"
 
     # A GET request to the API
     try:
