@@ -1,5 +1,6 @@
 import random
 import re
+import functools
 from .wildcards import WildcardCache
 import shared
 
@@ -16,6 +17,18 @@ class PromptEnhance:
         ]
         # Ensure swap categories are loaded on init
         self.cache.load_auto_swap_categories()  # Load dynamic categories on init
+
+    @staticmethod
+    @functools.lru_cache(maxsize=128)
+    def _get_swap_pattern(options_tuple):
+        """Compile and cache regex for swapping terms."""
+        return re.compile(r"(?<!\w)(" + "|".join(re.escape(opt) for opt in options_tuple) + r")(?!\w)", flags=re.IGNORECASE)
+
+    @staticmethod
+    @functools.lru_cache(maxsize=128)
+    def _get_clean_pattern(options_tuple):
+        """Compile and cache regex for cleaning options from prompt."""
+        return re.compile(rf",?\s*\b({'|'.join(re.escape(opt) for opt in options_tuple)})\b\s*,?", flags=re.IGNORECASE)
 
     def get_max_from_filename(self, filename):
         match = re.match(r"(.+)_(\d+)\.txt$", filename)
@@ -54,10 +67,11 @@ class PromptEnhance:
         return word
 
     def clean_prompt(self, prompt, options):
-        """Remove existing enhancements from the prompt, considering multi-word phrases."""
-        sorted_options = sorted(options, key=len, reverse=True)
-        for option in sorted_options:
-            prompt = re.sub(rf",?\s*\b{re.escape(option)}\b\s*,?", ",", prompt)
+        """Remove existing enhancements from the prompt using consolidated regex."""
+        if options:
+            sorted_options = sorted(options, key=len, reverse=True)
+            pattern = self._get_clean_pattern(tuple(sorted_options))
+            prompt = pattern.sub(",", prompt)
         prompt = re.sub(r",\s*,", ",", prompt)
         prompt = prompt.strip().strip(",")
         return prompt
@@ -68,9 +82,9 @@ class PromptEnhance:
         if not options:
             return prompt
 
-        # Build a replacement dictionary for this category
-        pattern = r"(?<!\w)(" + "|".join(re.escape(opt) for opt in options) + r")(?!\w)"
-        matches = list(re.finditer(pattern, prompt.lower()))
+        # Use cached pattern
+        pattern = self._get_swap_pattern(tuple(options))
+        matches = list(pattern.finditer(prompt))
 
         if not matches:
             return prompt
@@ -78,15 +92,10 @@ class PromptEnhance:
         # Group by term and pick one replacement per term
         replacements = {}
         for match in matches:
-            original_term = match.group(1)
+            original_term = match.group(1).lower()
             if original_term not in replacements:
-                available_options = [opt for opt in options if opt.lower() != original_term.lower()]
+                available_options = [opt for opt in options if opt.lower() != original_term]
                 replacements[original_term] = random.choice(available_options) if available_options else original_term
-
-        # Debug replacements
-        print(f"Category: {category}")
-        for orig, new in replacements.items():
-            print(f"Replacing '{orig}' with '{new}'")
 
         # Apply all replacements in one pass using a case-preserving approach
         def replace_match(match):
@@ -100,8 +109,8 @@ class PromptEnhance:
                 return new_term.capitalize()
             return new_term
 
-        # Use re.sub with the pattern and replacement function
-        updated_prompt = re.sub(pattern, replace_match, prompt, flags=re.IGNORECASE)
+        # Use the cached pattern for substitution
+        updated_prompt = pattern.sub(replace_match, prompt)
         return updated_prompt
 
     def enhance_prompt(self, prompt):
