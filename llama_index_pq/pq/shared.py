@@ -7,6 +7,7 @@ import numpy as np
 import globals
 import random
 from typing import Dict, Union, Optional, Tuple, List
+from wildcard_manager import WildcardManager
 
 
 g = globals.get_globals()
@@ -172,39 +173,21 @@ class WildcardResolver:
 	def __init__(self, wildcards_dir: str = "wildcards", cache_files: bool = True):
 		self.wildcards_dir = wildcards_dir
 		self.cache_files = cache_files
-		self.wildcard_cache: Dict[str, List[str]] = {}
 		self.iter_state: Dict[str, int] = {}
 		self.separator = " and "
 		self.max_depth = 10
 		self.max_retries = 1
 		self.resolved_values = {}
 		self.active_wildcards = set()
-		os.makedirs(wildcards_dir, exist_ok=True)
+
+		if not hasattr(g, 'wildcard_manager') or g.wildcard_manager is None:
+			g.wildcard_manager = WildcardManager(wildcards_dir=self.wildcards_dir)
+		elif g.wildcard_manager.wildcards_dir != self.wildcards_dir:
+			g.wildcard_manager = WildcardManager(wildcards_dir=self.wildcards_dir)
 
 	def load_wildcard_file(self, wildcard: str, count: int = 1) -> List[str]:
 		#print(f"Loading wildcard: {wildcard} (count={count})")
-		if wildcard in self.wildcard_cache and self.cache_files:
-			options = self.wildcard_cache[wildcard]
-		#	print(f"  From cache: {options}")
-		else:
-			wildcard_file = os.path.join(self.wildcards_dir, f"{wildcard}.txt")
-			if os.path.exists(wildcard_file):
-				with open(wildcard_file, "r", encoding="utf-8") as f:
-					options = [line.strip() for line in f if line.strip()]
-		#		print(f"  Loaded from {wildcard_file}: {options}")
-			else:
-				for root, _, files in os.walk(self.wildcards_dir):
-					if f"{wildcard}.txt" in files:
-						wildcard_file = os.path.join(root, f"{wildcard}.txt")
-						with open(wildcard_file, "r", encoding="utf-8") as f:
-							options = [line.strip() for line in f if line.strip()]
-		#				print(f"  Found in subdir {wildcard_file}: {options}")
-						break
-				else:
-					options = []
-					print(f"  File not found: {wildcard}.txt")
-			if self.cache_files:
-				self.wildcard_cache[wildcard] = options
+		options = g.wildcard_manager.load_wildcard_content(wildcard, cache=self.cache_files)
 
 		if not options:
 			result = ["MISSING_FILE"] * count
