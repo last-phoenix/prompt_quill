@@ -494,24 +494,25 @@ class ITIManager:
         self.log_step(f"Guessed topic: {topic}")
         return self.get_one_word_summary(topic)
 
-    def get_learned_combos(self, topic):
+    def get_learned_combos(self, topic, results=None):
 
         print(f'topic type: {type(topic)} value: {topic}')
 
-        with sqlite3.connect("image_scores.db") as db:
-            cursor = db.cursor()
-            # Get combos with enough runs
-            cursor.execute("""
-            SELECT model, pos_lora, neg_lora, pos_embedding, neg_embedding, 
-                   sampler, scheduler, vae, AVG(score) as avg_score, COUNT(*) as run_count
-            FROM image_scores
-            WHERE topic = ? AND score IS NOT NULL
-            GROUP BY model, pos_lora, neg_lora, pos_embedding, neg_embedding, 
-                     sampler, scheduler, vae
-            HAVING run_count >= 5
-            ORDER BY avg_score DESC
-        """, (str(topic),))
-            results = cursor.fetchall()
+        if results is None:
+            with sqlite3.connect("image_scores.db") as db:
+                cursor = db.cursor()
+                # Get combos with enough runs
+                cursor.execute("""
+                SELECT model, pos_lora, neg_lora, pos_embedding, neg_embedding,
+                       sampler, scheduler, vae, AVG(score) as avg_score, COUNT(*) as run_count
+                FROM image_scores
+                WHERE topic = ? AND score IS NOT NULL
+                GROUP BY model, pos_lora, neg_lora, pos_embedding, neg_embedding,
+                         sampler, scheduler, vae
+                HAVING run_count >= 5
+                ORDER BY avg_score DESC
+            """, (str(topic),))
+                results = cursor.fetchall()
 
         min_combos = 8  # Target: 8 unique combos (adjust as needed)
         learned_combos = [
@@ -747,19 +748,6 @@ class ITIManager:
             with sqlite3.connect("image_scores.db") as db:
                 cursor = db.cursor()
                 cursor.execute("""
-                    SELECT MAX(avg_score) 
-                    FROM (
-                        SELECT AVG(score) as avg_score
-                        FROM image_scores
-                        WHERE topic = ? AND score IS NOT NULL
-                        GROUP BY model, pos_lora, neg_lora, pos_embedding, neg_embedding, 
-                                 sampler, scheduler, vae
-                        HAVING COUNT(*) >= ?
-                    )
-                """, (topic_key, min_trials))
-                top_score = cursor.fetchone()[0] or effective_target
-
-                cursor.execute("""
                     SELECT model, pos_lora, neg_lora, pos_embedding, neg_embedding, 
                            sampler, scheduler, vae, AVG(score) as avg_score, COUNT(*) as run_count
                     FROM image_scores
@@ -767,16 +755,18 @@ class ITIManager:
                     GROUP BY model, pos_lora, neg_lora, pos_embedding, neg_embedding, 
                              sampler, scheduler, vae
                     HAVING run_count >= ?
+                    ORDER BY avg_score DESC
                 """, (topic_key, min_trials))
                 combo_stats = cursor.fetchall()
 
+            top_score = max((r[8] for r in combo_stats), default=effective_target)
             top_threshold = top_score * flop_factor
             self.log_step(f"Top score: {top_score:.1f}, Flop threshold: {top_threshold:.1f}")
 
             good_combos = {(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]) for r in combo_stats if r[8] >= top_threshold}
             flop_combos = {(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]) for r in combo_stats if r[8] < top_threshold}
 
-            learned_combos = self.get_learned_combos(topic_key)
+            learned_combos = self.get_learned_combos(topic_key, results=combo_stats)
             unexplored_combos = [c for c in all_combos if c not in good_combos and c not in flop_combos]
             random.shuffle(unexplored_combos)
 
